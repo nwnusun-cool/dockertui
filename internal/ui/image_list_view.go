@@ -804,15 +804,46 @@ func (v *ImageListView) updateColumnWidths() {
 		// 转换数据为 TableRow
 		if len(v.filteredImages) > 0 {
 			rows := make([]TableRow, len(v.filteredImages))
+			
+			// 定义整行颜色样式
+			danglingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+			unusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			
 			for i, img := range v.filteredImages {
 				created := formatCreatedTime(img.Created)
 				size := formatSize(img.Size)
-				rows[i] = TableRow{
-					img.ShortID,
-					img.Repository,
-					img.Tag,
-					size,
-					created,
+				
+				// 根据镜像状态决定是否对整行应用颜色
+				var rowStyle lipgloss.Style
+				var needsStyle bool
+				
+				if img.Dangling {
+					rowStyle = danglingStyle
+					needsStyle = true
+				} else if !img.InUse {
+					rowStyle = unusedStyle
+					needsStyle = true
+				} else {
+					needsStyle = false
+				}
+				
+				// 构建行数据
+				if needsStyle {
+					rows[i] = TableRow{
+						rowStyle.Render(img.ShortID),
+						rowStyle.Render(img.Repository),
+						rowStyle.Render(img.Tag),
+						rowStyle.Render(size),
+						rowStyle.Render(created),
+					}
+				} else {
+					rows[i] = TableRow{
+						img.ShortID,
+						img.Repository,
+						img.Tag,
+						size,
+						created,
+					}
 				}
 			}
 			v.scrollTable.SetRows(rows)
@@ -830,6 +861,10 @@ func (v *ImageListView) updateColumnWidths() {
 func (v *ImageListView) imagesToRows(images []docker.Image) []table.Row {
 	rows := make([]table.Row, len(images))
 
+	// 定义整行颜色样式
+	danglingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // 黄色 - 悬垂镜像
+	unusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))   // 灰色 - 未使用
+
 	for i, img := range images {
 		// CREATED - 友好格式
 		created := formatCreatedTime(img.Created)
@@ -837,28 +872,40 @@ func (v *ImageListView) imagesToRows(images []docker.Image) []table.Row {
 		// SIZE - 友好格式
 		size := formatSize(img.Size)
 
-		// 根据镜像状态应用样式
-		var styledRepo, styledTag string
+		// 根据镜像状态决定是否对整行应用颜色
+		var rowStyle lipgloss.Style
+		var needsStyle bool
+		
 		if img.Dangling {
-			// 悬垂镜像 - 灰色
-			styledRepo = imageDanglingStyle.Render(img.Repository)
-			styledTag = imageDanglingStyle.Render(img.Tag)
-		} else if img.InUse {
-			// 活跃镜像 - 绿色
-			styledRepo = imageActiveStyle.Render(img.Repository)
-			styledTag = imageActiveStyle.Render(img.Tag)
+			// 悬垂镜像 - 黄色整行
+			rowStyle = danglingStyle
+			needsStyle = true
+		} else if !img.InUse {
+			// 未使用镜像 - 灰色整行
+			rowStyle = unusedStyle
+			needsStyle = true
 		} else {
-			// 未使用镜像 - 灰色
-			styledRepo = imageUnusedStyle.Render(img.Repository)
-			styledTag = imageUnusedStyle.Render(img.Tag)
+			// 活跃镜像 - 不应用样式
+			needsStyle = false
 		}
 
-		rows[i] = table.Row{
-			img.ShortID,
-			styledRepo,
-			styledTag,
-			size,
-			created,
+		// 构建行数据
+		if needsStyle {
+			rows[i] = table.Row{
+				rowStyle.Render(img.ShortID),
+				rowStyle.Render(img.Repository),
+				rowStyle.Render(img.Tag),
+				rowStyle.Render(size),
+				rowStyle.Render(created),
+			}
+		} else {
+			rows[i] = table.Row{
+				img.ShortID,
+				img.Repository,
+				img.Tag,
+				size,
+				created,
+			}
 		}
 	}
 

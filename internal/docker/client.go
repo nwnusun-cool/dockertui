@@ -106,6 +106,13 @@ type Image struct {
 	Containers []string // 使用此镜像的容器 ID 列表
 }
 
+// ContainerRef 表示容器引用信息
+type ContainerRef struct {
+	ID    string // 容器 ID
+	Name  string // 容器名称
+	State string // 容器状态: running, exited, paused 等
+}
+
 // ImageDetails 表示镜像的详细信息（用于详情视图）
 type ImageDetails struct {
 	ID            string            // 镜像 ID
@@ -120,6 +127,7 @@ type ImageDetails struct {
 	Author        string            // 作者
 	Comment       string            // 注释
 	Layers        []string          // 层 ID 列表
+	History       []ImageHistory    // 镜像构建历史
 	Env           []string          // 环境变量
 	Cmd           []string          // 默认命令
 	Entrypoint    []string          // 入口点
@@ -127,7 +135,16 @@ type ImageDetails struct {
 	ExposedPorts  []string          // 暴露的端口
 	Volumes       []string          // 卷
 	User          string            // 用户
-	ContainerIDs  []string          // 使用此镜像的容器 ID 列表
+	Containers    []ContainerRef    // 使用此镜像的容器列表
+}
+
+// ImageHistory 表示镜像构建历史的一条记录
+type ImageHistory struct {
+	ID        string    // 层 ID（可能为 <missing>）
+	Created   time.Time // 创建时间
+	CreatedBy string    // 创建命令
+	Size      int64     // 大小（字节）
+	Comment   string    // 注释
 }
 
 // LogOptions 日志读取选项
@@ -654,10 +671,23 @@ func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageD
 		return nil, fmt.Errorf("获取容器列表失败: %w", err)
 	}
 
-	containerIDs := make([]string, 0)
+	containerRefs := make([]ContainerRef, 0)
 	for _, cont := range containers {
 		if cont.ImageID == inspectResp.ID {
-			containerIDs = append(containerIDs, cont.ID)
+			// 提取容器名称（去除前导 /）
+			containerName := ""
+			if len(cont.Names) > 0 {
+				containerName = cont.Names[0]
+				if len(containerName) > 0 && containerName[0] == '/' {
+					containerName = containerName[1:]
+				}
+			}
+
+			containerRefs = append(containerRefs, ContainerRef{
+				ID:    cont.ID,
+				Name:  containerName,
+				State: string(cont.State),
+			})
 		}
 	}
 
@@ -702,6 +732,26 @@ func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageD
 		}
 	}
 
+	// 获取镜像构建历史
+	historyResp, err := c.cli.ImageHistory(ctx, imageID)
+	var history []ImageHistory
+	if err == nil {
+		for _, h := range historyResp {
+			historyItem := ImageHistory{
+				ID:        h.ID,
+				Created:   time.Unix(h.Created, 0),
+				CreatedBy: h.CreatedBy,
+				Size:      h.Size,
+				Comment:   h.Comment,
+			}
+			// 如果 ID 为空，显示为 <missing>
+			if historyItem.ID == "" {
+				historyItem.ID = "<missing>"
+			}
+			history = append(history, historyItem)
+		}
+	}
+
 	return &ImageDetails{
 		ID:           inspectResp.ID,
 		Repository:   repository,
@@ -715,6 +765,7 @@ func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageD
 		Author:       inspectResp.Author,
 		Comment:      inspectResp.Comment,
 		Layers:       layers,
+		History:      history,
 		Env:          env,
 		Cmd:          cmd,
 		Entrypoint:   entrypoint,
@@ -722,7 +773,7 @@ func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageD
 		ExposedPorts: exposedPorts,
 		Volumes:      volumes,
 		User:         user,
-		ContainerIDs: containerIDs,
+		Containers:   containerRefs,
 	}, nil
 }
 

@@ -19,7 +19,7 @@ const (
 	TabUsage                            // 使用状态
 	TabConfig                           // 配置信息
 	TabEnvVars                          // 环境变量
-	TabLayers                           // 层信息
+	TabHistory                          // 构建历史
 	TabLabels                           // 标签信息
 )
 
@@ -29,7 +29,7 @@ var imageTabNames = []string{
 	"Usage",
 	"Config",
 	"Env Vars",
-	"Layers",
+	"History",
 	"Labels",
 }
 
@@ -179,7 +179,7 @@ func (v *ImageDetailsView) Update(msg tea.Msg) (View, tea.Cmd) {
 			v.scrollOffset = 0
 			return v, nil
 		case "5":
-			v.activeTab = TabLayers
+			v.activeTab = TabHistory
 			v.scrollOffset = 0
 			return v, nil
 		case "6":
@@ -265,8 +265,8 @@ func (v *ImageDetailsView) renderCurrentTab() string {
 		return v.renderConfig()
 	case TabEnvVars:
 		return v.renderEnvVars()
-	case TabLayers:
-		return v.renderLayers()
+	case TabHistory:
+		return v.renderHistory()
 	case TabLabels:
 		return v.renderLabels()
 	default:
@@ -335,19 +335,45 @@ func (v *ImageDetailsView) renderUsage() string {
 	}
 
 	// 使用此镜像的容器
-	if v.details != nil && len(v.details.ContainerIDs) > 0 {
+	if v.details != nil && len(v.details.Containers) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, imageDetailsLabelStyle.Render("CONTAINERS:")+" ("+fmt.Sprintf("%d", len(v.details.ContainerIDs))+")")
-		for i, containerID := range v.details.ContainerIDs {
+		lines = append(lines, imageDetailsLabelStyle.Render("CONTAINERS:")+" ("+fmt.Sprintf("%d", len(v.details.Containers))+")")
+		for i, containerRef := range v.details.Containers {
 			if i >= 10 {
-				lines = append(lines, "  "+imageDetailsHintStyle.Render(fmt.Sprintf("... and %d more", len(v.details.ContainerIDs)-10)))
+				lines = append(lines, "  "+imageDetailsHintStyle.Render(fmt.Sprintf("... and %d more", len(v.details.Containers)-10)))
 				break
 			}
-			shortID := containerID
+			shortID := containerRef.ID
 			if len(shortID) > 12 {
 				shortID = shortID[:12]
 			}
-			lines = append(lines, "  • "+shortID)
+
+			// 根据状态设置样式
+			var stateStyle lipgloss.Style
+			var stateIcon string
+			switch containerRef.State {
+			case "running":
+				stateStyle = imageContainerRunningStyle
+				stateIcon = "🟢"
+			case "exited":
+				stateStyle = imageContainerStoppedStyle
+				stateIcon = "🔴"
+			case "paused":
+				stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+				stateIcon = "🟡"
+			default:
+				stateStyle = imageDetailsHintStyle
+				stateIcon = "⚪"
+			}
+
+			// 格式化显示：ID (名称) [状态]
+			containerInfo := fmt.Sprintf("%s (%s) %s %s",
+				imageDetailsKeyStyle.Render(shortID),
+				imageDetailsValueStyle.Render(containerRef.Name),
+				stateIcon,
+				stateStyle.Render(containerRef.State))
+
+			lines = append(lines, "  • "+containerInfo)
 		}
 	} else if v.image != nil && len(v.image.Containers) > 0 {
 		lines = append(lines, "")
@@ -490,48 +516,92 @@ func (v *ImageDetailsView) renderEnvVars() string {
 	return "\n" + v.wrapInBox(title, content, boxWidth)
 }
 
-// renderLayers 渲染层信息
-func (v *ImageDetailsView) renderLayers() string {
-	if v.details == nil || len(v.details.Layers) == 0 {
-		return "\n  " + imageDetailsHintStyle.Render("无层信息")
+// renderHistory 渲染构建历史（类似 docker history）
+func (v *ImageDetailsView) renderHistory() string {
+	if v.details == nil || len(v.details.History) == 0 {
+		return "\n  " + imageDetailsHintStyle.Render("无构建历史信息")
 	}
 
 	var lines []string
-	layerCount := len(v.details.Layers)
+	historyCount := len(v.details.History)
 
-	// 计算可显示的行数
-	maxLines := v.height - 15
-	if maxLines < 5 {
-		maxLines = 5
+	// 计算可显示的行数（每条历史记录占 2-3 行）
+	maxItems := (v.height - 15) / 3
+	if maxItems < 3 {
+		maxItems = 3
 	}
 
 	// 应用滚动
 	startIdx := v.scrollOffset
-	endIdx := startIdx + maxLines
-	if endIdx > layerCount {
-		endIdx = layerCount
+	endIdx := startIdx + maxItems
+	if endIdx > historyCount {
+		endIdx = historyCount
 	}
-	v.maxScroll = layerCount - maxLines
+	v.maxScroll = historyCount - maxItems
 	if v.maxScroll < 0 {
 		v.maxScroll = 0
 	}
 
 	for i := startIdx; i < endIdx; i++ {
-		layer := v.details.Layers[i]
-		// 截断 SHA256
-		shortLayer := layer
-		if strings.HasPrefix(shortLayer, "sha256:") {
-			shortLayer = shortLayer[7:]
+		h := v.details.History[i]
+
+		// 格式化 ID
+		idStr := h.ID
+		if len(idStr) > 12 && idStr != "<missing>" {
+			if strings.HasPrefix(idStr, "sha256:") {
+				idStr = idStr[7:19]
+			} else {
+				idStr = idStr[:12]
+			}
 		}
-		if len(shortLayer) > 16 {
-			shortLayer = shortLayer[:16] + "..."
+
+		// 格式化创建时间
+		createdStr := formatCreatedTime(h.Created)
+
+		// 格式化命令（截断过长的命令）
+		cmdStr := h.CreatedBy
+		// 移除 /bin/sh -c 前缀
+		cmdStr = strings.TrimPrefix(cmdStr, "/bin/sh -c ")
+		cmdStr = strings.TrimPrefix(cmdStr, "#(nop) ")
+		// 截断过长的命令
+		maxCmdLen := v.width - 20
+		if maxCmdLen < 40 {
+			maxCmdLen = 40
 		}
-		lines = append(lines, fmt.Sprintf("  %2d. %s", i+1, shortLayer))
+		if len(cmdStr) > maxCmdLen {
+			cmdStr = cmdStr[:maxCmdLen-3] + "..."
+		}
+
+		// 格式化大小
+		sizeStr := ""
+		if h.Size > 0 {
+			sizeStr = formatSize(h.Size)
+		} else {
+			sizeStr = "0B"
+		}
+
+		// 构建显示行
+		// 第一行：ID + 创建时间 + 大小
+		line1 := fmt.Sprintf("  %s  %s  %s",
+			imageDetailsKeyStyle.Render(idStr),
+			imageDetailsHintStyle.Render(createdStr),
+			imageDetailsValueStyle.Render(sizeStr))
+
+		// 第二行：命令
+		line2 := "    " + imageDetailsValueStyle.Render(cmdStr)
+
+		lines = append(lines, line1)
+		lines = append(lines, line2)
+
+		// 添加分隔线（除了最后一条）
+		if i < endIdx-1 {
+			lines = append(lines, "")
+		}
 	}
 
 	// 滚动提示
 	if v.maxScroll > 0 {
-		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, layerCount)
+		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, historyCount)
 		if v.scrollOffset > 0 {
 			scrollInfo += "↑ "
 		}
@@ -548,7 +618,7 @@ func (v *ImageDetailsView) renderLayers() string {
 		boxWidth = 60
 	}
 
-	title := fmt.Sprintf("Layers (%d)", layerCount)
+	title := fmt.Sprintf("Build History (%d)", historyCount)
 	return "\n" + v.wrapInBox(title, content, boxWidth)
 }
 

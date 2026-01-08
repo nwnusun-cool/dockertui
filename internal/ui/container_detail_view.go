@@ -150,7 +150,7 @@ func (v *ContainerDetailView) View() string {
 		tabBar := v.renderTabBar()
 		tabBarHeight := strings.Count(tabBar, "\n") + 1
 		tabContent := v.renderTabContent(contentHeight - tabBarHeight)
-		content = tabBar + tabContent
+		content = "\n" + tabBar + tabContent
 	}
 	
 	// 组合布局：header + content + footer
@@ -268,34 +268,32 @@ func (v *ContainerDetailView) renderHeader() string {
 
 // renderTabBar 渲染标签页导航
 func (v *ContainerDetailView) renderTabBar() string {
-	tabs := []string{"基本信息", "资源监控", "网络端口", "存储挂载", "环境变量", "标签"}
+	tabs := []string{"Basic Info", "Resources", "Network", "Storage", "Env Vars", "Labels"}
 	
 	// 根据宽度决定是否使用简短标签
 	if v.width < 80 {
-		tabs = []string{"基本", "资源", "网络", "存储", "环境", "标签"}
+		tabs = []string{"Basic", "Stats", "Network", "Storage", "Env", "Labels"}
 	}
 	
 	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
+		Foreground(lipgloss.Color("220")).
 		Bold(true).
-		Padding(0, 1)
+		Underline(true)
 	
 	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
-		Background(lipgloss.Color("238")).
-		Padding(0, 1)
+		Foreground(lipgloss.Color("245"))
 	
 	var parts []string
 	for i, tab := range tabs {
+		tabNum := fmt.Sprintf("[%d]", i+1)
 		if i == v.currentTab {
-			parts = append(parts, activeStyle.Render(tab))
+			parts = append(parts, activeStyle.Render(tabNum+" "+tab))
 		} else {
-			parts = append(parts, inactiveStyle.Render(tab))
+			parts = append(parts, inactiveStyle.Render(tabNum+" "+tab))
 		}
 	}
 	
-	tabLine := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	tabLine := "  " + strings.Join(parts, "  │  ")
 	
 	// 底部分隔线
 	lineWidth := v.width - 2
@@ -306,7 +304,7 @@ func (v *ContainerDetailView) renderTabBar() string {
 		Foreground(lipgloss.Color("240")).
 		Render(strings.Repeat("─", lineWidth))
 	
-	return " " + tabLine + "\n " + line + "\n"
+	return tabLine + "\n" + " " + line + "\n"
 }
 
 // renderBasicInfo 渲染基本信息

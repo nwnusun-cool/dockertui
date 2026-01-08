@@ -862,11 +862,9 @@ func (v *ContainerListView) renderCompactStatusBar() string {
 func (v *ContainerListView) containersToRows(containers []docker.Container) []table.Row {
 	rows := make([]table.Row, len(containers))
 	
-	// 定义状态列颜色样式
-	runningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))  // 绿色 - 运行中
-	healthyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("46"))  // 亮绿色 - 健康
-	exitedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))  // 灰色 - 已停止
-	pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))  // 黄色 - 暂停
+	// 定义整行颜色样式
+	exitedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))    // 灰色 - 已停止
+	pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))    // 黄色 - 暂停
 	unhealthyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // 红色 - 不健康
 	
 	for i, c := range containers {
@@ -879,29 +877,49 @@ func (v *ContainerListView) containersToRows(containers []docker.Container) []ta
 			ports = ""
 		}
 		
-		// 只对 STATUS 列应用颜色样式
-		var styledStatus string
+		// 根据状态决定是否对整行应用颜色
+		var rowStyle lipgloss.Style
+		var needsStyle bool
+		
 		switch {
 		case strings.Contains(strings.ToLower(c.Status), "unhealthy"):
-			styledStatus = unhealthyStyle.Render(c.Status)
-		case strings.Contains(strings.ToLower(c.Status), "healthy"):
-			styledStatus = healthyStyle.Render(c.Status)
-		case c.State == "running":
-			styledStatus = runningStyle.Render(c.Status)
+			// 不健康 - 红色整行
+			rowStyle = unhealthyStyle
+			needsStyle = true
 		case c.State == "paused":
-			styledStatus = pausedStyle.Render(c.Status)
+			// 暂停 - 黄色整行
+			rowStyle = pausedStyle
+			needsStyle = true
+		case c.State == "exited":
+			// 已停止 - 灰色整行
+			rowStyle = exitedStyle
+			needsStyle = true
 		default:
-			styledStatus = exitedStyle.Render(c.Status)
+			// 运行中或健康 - 不应用样式
+			needsStyle = false
 		}
 		
-		rows[i] = table.Row{
-			c.ShortID,     // CONTAINER ID
-			c.Name,        // NAMES (移到第二列)
-			c.Image,       // IMAGE
-			c.Command,     // COMMAND
-			created,       // CREATED
-			styledStatus,  // STATUS (带颜色)
-			ports,         // PORTS
+		// 构建行数据
+		if needsStyle {
+			rows[i] = table.Row{
+				rowStyle.Render(c.ShortID),
+				rowStyle.Render(c.Name),
+				rowStyle.Render(c.Image),
+				rowStyle.Render(c.Command),
+				rowStyle.Render(created),
+				rowStyle.Render(c.Status),
+				rowStyle.Render(ports),
+			}
+		} else {
+			rows[i] = table.Row{
+				c.ShortID,
+				c.Name,
+				c.Image,
+				c.Command,
+				created,
+				c.Status,
+				ports,
+			}
 		}
 	}
 	
@@ -1107,20 +1125,58 @@ func (v *ContainerListView) updateColumnWidths() {
 		// 转换数据为 TableRow（NAME 在第二列）
 		if len(v.filteredContainers) > 0 {
 			rows := make([]TableRow, len(v.filteredContainers))
+			
+			// 定义整行颜色样式
+			exitedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+			unhealthyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+			
 			for i, c := range v.filteredContainers {
 				created := formatCreatedTime(c.Created)
 				ports := c.Ports
 				if ports == "" {
 					ports = "-"
 				}
-				rows[i] = TableRow{
-					c.ShortID,
-					c.Name,
-					c.Image,
-					c.Command,
-					created,
-					c.Status,
-					ports,
+				
+				// 根据状态决定是否对整行应用颜色
+				var rowStyle lipgloss.Style
+				var needsStyle bool
+				
+				switch {
+				case strings.Contains(strings.ToLower(c.Status), "unhealthy"):
+					rowStyle = unhealthyStyle
+					needsStyle = true
+				case c.State == "paused":
+					rowStyle = pausedStyle
+					needsStyle = true
+				case c.State == "exited":
+					rowStyle = exitedStyle
+					needsStyle = true
+				default:
+					needsStyle = false
+				}
+				
+				// 构建行数据
+				if needsStyle {
+					rows[i] = TableRow{
+						rowStyle.Render(c.ShortID),
+						rowStyle.Render(c.Name),
+						rowStyle.Render(c.Image),
+						rowStyle.Render(c.Command),
+						rowStyle.Render(created),
+						rowStyle.Render(c.Status),
+						rowStyle.Render(ports),
+					}
+				} else {
+					rows[i] = TableRow{
+						c.ShortID,
+						c.Name,
+						c.Image,
+						c.Command,
+						created,
+						c.Status,
+						ports,
+					}
 				}
 			}
 			v.scrollTable.SetRows(rows)
