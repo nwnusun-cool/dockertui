@@ -14,15 +14,14 @@ import (
 	"docktui/internal/docker"
 )
 
-// 容器列表视图样式定义
+// 容器列表视图样式定义 - 使用自适应颜色，不硬编码背景色
 var (
 	// 状态栏样式
 	statusBarLabelStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("220")).
 		Bold(true)
 	
-	statusBarValueStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+	statusBarValueStyle = lipgloss.NewStyle()
 	
 	statusBarKeyStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("81"))
@@ -33,8 +32,7 @@ var (
 		Bold(true)
 	
 	// 过滤状态样式
-	filterAllStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+	filterAllStyle = lipgloss.NewStyle()
 	
 	filterRunningStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("82")).
@@ -60,7 +58,7 @@ var (
 	searchHintStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
 	
-	// 对话框样式
+	// 对话框样式 - 使用边框区分，不设置背景
 	dialogStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -73,9 +71,9 @@ var (
 	dialogWarningStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
 	
-	// 按钮样式
+	// 按钮样式 - 使用 Reverse 实现选中效果
 	buttonActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255")).
+		Reverse(true).
 		Bold(true).
 		Padding(0, 2)
 	
@@ -681,7 +679,7 @@ func (v *ContainerListView) renderConfirmDialogContent() string {
 		return ""
 	}
 
-	// 定义样式
+	// 定义样式 - 不硬编码背景色
 	dialogStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -701,12 +699,11 @@ func (v *ContainerListView) renderConfirmDialogContent() string {
 	okBtnStyle := lipgloss.NewStyle().
 		Padding(0, 2)
 	
-	// 根据选择状态设置按钮样式
+	// 根据选择状态设置按钮样式 - 使用 Reverse 实现选中效果
 	if v.confirmSelection == 0 {
 		// Cancel 被选中
 		cancelBtnStyle = cancelBtnStyle.
-			Background(lipgloss.Color("33")).
-			Foreground(lipgloss.Color("255")).
+			Reverse(true).
 			Bold(true)
 		okBtnStyle = okBtnStyle.
 			Foreground(lipgloss.Color("245"))
@@ -715,8 +712,7 @@ func (v *ContainerListView) renderConfirmDialogContent() string {
 		cancelBtnStyle = cancelBtnStyle.
 			Foreground(lipgloss.Color("245"))
 		okBtnStyle = okBtnStyle.
-			Background(lipgloss.Color("34")).
-			Foreground(lipgloss.Color("255")).
+			Reverse(true).
 			Bold(true)
 	}
 	

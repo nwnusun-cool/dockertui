@@ -16,26 +16,35 @@ import (
 	"docktui/internal/docker"
 )
 
-// 全局主题颜色定义 - 集中管理所有颜色
+// 全局主题颜色定义 - 使用自适应颜色，不硬编码背景色
+// 让终端自己处理背景，只设置前景色
 var (
-	// 主背景色 - 深灰色
-	ThemeBgColor = lipgloss.Color("235")
-	// 次要背景色 - 稍浅的灰色（用于卡片、面板等）
-	ThemeBgSecondary = lipgloss.Color("236")
-	// 边框颜色
-	ThemeBorderColor = lipgloss.Color("240")
-	// 主文字颜色
-	ThemeTextColor = lipgloss.Color("252")
-	// 次要文字颜色
+	// 主文字颜色 - 使用终端默认前景色（不设置）
+	// ThemeTextColor - 不再使用固定颜色
+	
+	// 次要文字颜色 - 灰色，在亮色和暗色终端都可读
 	ThemeTextMuted = lipgloss.Color("245")
-	// 高亮颜色
+	
+	// 边框颜色 - 中性灰色
+	ThemeBorderColor = lipgloss.Color("240")
+	
+	// 高亮颜色 - 青色，在两种主题下都醒目
 	ThemeHighlight = lipgloss.Color("81")
-	// 成功颜色
+	
+	// 成功颜色 - 绿色
 	ThemeSuccess = lipgloss.Color("82")
-	// 警告颜色
+	
+	// 警告颜色 - 黄色
 	ThemeWarning = lipgloss.Color("220")
-	// 错误颜色
+	
+	// 错误颜色 - 红色
 	ThemeError = lipgloss.Color("196")
+	
+	// 标题颜色 - 黄色/金色
+	ThemeTitleColor = lipgloss.Color("220")
+	
+	// 按键提示颜色 - 青色
+	ThemeKeyColor = lipgloss.Color("81")
 )
 
 // ViewType 表示当前显示的视图类型
@@ -743,8 +752,8 @@ func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// fillBackground 填充整个屏幕的背景色
-// 这是统一处理背景的核心函数
+// fillBackground 填充整个屏幕，确保每行宽度一致
+// 不强制设置背景色，让终端使用默认背景
 func (m Model) fillBackground(content string) string {
 	if m.width <= 0 || m.height <= 0 {
 		return content
@@ -753,11 +762,7 @@ func (m Model) fillBackground(content string) string {
 	// 将内容按行分割
 	lines := strings.Split(content, "\n")
 	
-	// 背景色 ANSI 转义码 (256色模式，颜色235)
-	bgStart := "\x1b[48;5;235m"
-	bgReset := "\x1b[0m"
-	
-	// 处理每一行，确保宽度一致并填充背景
+	// 处理每一行，确保宽度一致
 	var result strings.Builder
 	for i := 0; i < m.height; i++ {
 		var line string
@@ -769,17 +774,12 @@ func (m Model) fillBackground(content string) string {
 		visibleLen := visibleLength(line)
 		
 		// 如果行太短，用空格填充到屏幕宽度
-		padding := ""
 		if visibleLen < m.width {
-			padding = strings.Repeat(" ", m.width-visibleLen)
+			padding := m.width - visibleLen
+			line = line + strings.Repeat(" ", padding)
 		}
 		
-		// 整行包裹背景色：背景开始 + 内容 + 填充 + 重置
-		result.WriteString(bgStart)
 		result.WriteString(line)
-		result.WriteString(padding)
-		result.WriteString(bgReset)
-		
 		if i < m.height-1 {
 			result.WriteString("\n")
 		}
@@ -856,24 +856,24 @@ func (m Model) View() string {
 	// 添加分级消息显示（非容器列表和 Compose 列表视图）
 	if m.currentView != ViewContainerList && m.currentView != ViewComposeList {
 		if m.errorMsg != "" && m.dockerConnected {
-			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true).Background(ThemeBgColor)
+			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true)
 			content = "\n" + errorStyle.Render("❌ 致命错误: "+m.errorMsg) + "\n" + content
 		}
 		if m.warningMsg != "" {
-			warnStyle := lipgloss.NewStyle().Foreground(ThemeWarning).Bold(true).Background(ThemeBgColor)
+			warnStyle := lipgloss.NewStyle().Foreground(ThemeWarning).Bold(true)
 			content += "\n\n" + warnStyle.Render("⚠️ 警告: "+m.warningMsg)
 		}
 		if m.infoMsg != "" {
-			infoStyle := lipgloss.NewStyle().Foreground(ThemeHighlight).Background(ThemeBgColor)
+			infoStyle := lipgloss.NewStyle().Foreground(ThemeHighlight)
 			content += "\n\n" + infoStyle.Render(m.infoMsg)
 		}
 		if m.successMsg != "" {
-			successStyle := lipgloss.NewStyle().Foreground(ThemeSuccess).Bold(true).Background(ThemeBgColor)
+			successStyle := lipgloss.NewStyle().Foreground(ThemeSuccess).Bold(true)
 			content += "\n\n" + successStyle.Render(m.successMsg)
 		}
 	}
 	
-	// 统一填充背景
+	// 填充每行到屏幕宽度
 	return m.fillBackground(content)
 }
 

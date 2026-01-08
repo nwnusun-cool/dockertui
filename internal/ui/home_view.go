@@ -37,7 +37,7 @@ type HomeView struct {
 	lastRefreshTime   time.Time
 }
 
-// 首页样式定义 - 使用全局主题颜色
+// 首页样式定义 - 使用自适应颜色，不硬编码背景色
 var (
 	// Logo 样式
 	logoStyle = lipgloss.NewStyle().
@@ -48,9 +48,8 @@ var (
 		Foreground(lipgloss.Color("220")).
 		Bold(true)
 
-	// 顶部状态栏样式 - 不设置背景，由全局 fillBackground 处理
+	// 顶部状态栏样式
 	homeStatusBarStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
 		Padding(0, 1)
 
 	homeStatusConnectedStyle = lipgloss.NewStyle().
@@ -61,19 +60,17 @@ var (
 		Foreground(lipgloss.Color("196")).
 		Bold(true)
 
-	// 卡片样式 - 未选中（保留背景色用于区分卡片区域）
+	// 卡片样式 - 未选中（使用边框区分，不设置背景）
 	cardStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
-		Background(lipgloss.Color("236")).
 		Padding(1, 2).
 		Width(36)
 
-	// 卡片样式 - 选中
+	// 卡片样式 - 选中（高亮边框）
 	cardSelectedStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#6699FF")).
-		Background(lipgloss.Color("238")).
 		Padding(1, 2).
 		Width(36)
 
@@ -87,8 +84,7 @@ var (
 		Bold(true)
 
 	// 卡片状态样式
-	cardStatsStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+	cardStatsStyle = lipgloss.NewStyle()
 
 	cardStatsRunningStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("82"))
@@ -100,7 +96,7 @@ var (
 	cardHintSelectedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("81"))
 
-	// 底部操作区样式 - 不设置背景，由全局 fillBackground 处理
+	// 底部操作区样式
 	homeFooterStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245")).
 		Padding(0, 1)

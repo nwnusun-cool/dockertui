@@ -45,19 +45,17 @@ type TableStyles struct {
 	ScrollIndicator lipgloss.Style
 }
 
-// DefaultTableStyles 默认表格样式（使用全局主题颜色）
+// DefaultTableStyles 默认表格样式 - 使用自适应颜色
+// 不硬编码背景色，使用 Reverse 实现选中效果
 func DefaultTableStyles() TableStyles {
 	return TableStyles{
 		Header: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ThemeTextColor).
-			Background(ThemeBgSecondary),
-		Cell: lipgloss.NewStyle().
-			Foreground(ThemeTextColor).
-			Background(ThemeBgColor),
+			Foreground(ThemeTitleColor),
+		Cell: lipgloss.NewStyle(),  // 使用终端默认颜色
 		Selected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("229")).
-			Background(lipgloss.Color("57")),
+			Reverse(true).  // 使用反转色，自动适配终端主题
+			Bold(true),
 		Border: lipgloss.NewStyle().
 			Foreground(ThemeBorderColor),
 		ScrollIndicator: lipgloss.NewStyle().
