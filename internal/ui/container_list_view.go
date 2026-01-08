@@ -834,7 +834,7 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	// 第四行：查看操作
 	row4Label := labelStyle.Render("View:")
-	row4Keys := makeItem("<Enter>", "Details") + makeItem("<b>", "Back") + makeItem("<q>", "Quit")
+	row4Keys := makeItem("<Enter>", "Details") + makeItem("<i>", "Images") + makeItem("<b>", "Back") + makeItem("<q>", "Quit")
 	lines = append(lines, "  "+row4Label+row4Keys)
 	
 	// 第五行：版本 + 刷新时间 + vim 提示

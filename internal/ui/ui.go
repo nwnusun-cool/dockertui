@@ -63,6 +63,10 @@ const (
 	ViewHelp
 	// ViewComposeList Compose 项目列表视图
 	ViewComposeList
+	// ViewImageList 镜像列表视图
+	ViewImageList
+	// ViewImageDetails 镜像详情视图
+	ViewImageDetails
 )
 
 // View 接口定义了所有视图必须实现的方法
@@ -96,6 +100,8 @@ type Model struct {
 	logsView            View              // 日志视图
 	helpView            View              // 帮助视图
 	composeListView     *ComposeListView  // Compose 项目列表视图
+	imageListView       *ImageListView    // 镜像列表视图
+	imageDetailsView    *ImageDetailsView // 镜像详情视图
 	
 	// 全局状态字段
 	selectedContainerID string   // 当前选中的容器 ID
@@ -122,6 +128,7 @@ func NewModel(dockerClient docker.Client) Model {
 	containerDetailView := NewContainerDetailView(dockerClient)
 	logsView := NewLogsView(dockerClient)
 	helpView := NewHelpView(dockerClient)
+	imageListView := NewImageListView(dockerClient)
 	
 	// 初始化 Compose 客户端和视图
 	var composeListView *ComposeListView
@@ -140,6 +147,7 @@ func NewModel(dockerClient docker.Client) Model {
 		logsView:            logsView,
 		helpView:            helpView,
 		composeListView:     composeListView,
+		imageListView:       imageListView,
 		ready:               false,
 		dockerConnected:     true, // 默认假设已连接
 	}
@@ -368,6 +376,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.composeListView != nil {
 			m.composeListView.SetSize(msg.Width, msg.Height)
 		}
+		if m.imageListView != nil {
+			m.imageListView.SetSize(msg.Width, msg.Height)
+		}
 		return m, nil
 		
 	case tea.KeyMsg:
@@ -452,6 +463,12 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case ViewComposeList:
 			// Compose 列表返回首页
 			m.currentView = ViewWelcome
+		case ViewImageList:
+			// 镜像列表返回容器列表
+			m.currentView = ViewContainerList
+		case ViewImageDetails:
+			// 镜像详情返回镜像列表
+			m.currentView = ViewImageList
 		default:
 			m.currentView = ViewWelcome
 		}
@@ -477,6 +494,8 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleHelpKeys(msg)
 	case ViewComposeList:
 		return m.handleComposeListKeys(msg)
+	case ViewImageList:
+		return m.handleImageListKeys(msg)
 	}
 	
 	return m, nil
@@ -567,6 +586,19 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	
 	switch msg.String() {
+	case "i":
+		// 切换到镜像列表视图
+		m.previousView = m.currentView
+		m.currentView = ViewImageList
+		
+		// 初始化镜像列表视图
+		var initCmd tea.Cmd
+		if m.imageListView != nil {
+			initCmd = m.imageListView.Init()
+		}
+		
+		return m, initCmd
+		
 	case "enter":
 		// 进入容器详情视图（L3.2）
 		// 获取当前选中的容器
@@ -752,6 +784,55 @@ func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleImageListKeys 处理镜像列表视图的快捷键
+func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// 镜像列表视图的按键大部分由视图自己处理
+	// 这里只处理需要切换视图的按键
+	
+	// 如果镜像列表视图正在显示对话框，不拦截任何按键
+	if m.imageListView != nil && m.imageListView.showConfirmDialog {
+		return m, nil
+	}
+	
+	// 如果镜像列表视图正在搜索，不拦截任何按键
+	if m.imageListView != nil && m.imageListView.isSearching {
+		return m, nil
+	}
+	
+	switch msg.String() {
+	case "c":
+		// 切换回容器列表视图
+		m.previousView = m.currentView
+		m.currentView = ViewContainerList
+		
+		// 初始化容器列表视图
+		var initCmd tea.Cmd
+		if m.containerListView != nil {
+			initCmd = m.containerListView.Init()
+		}
+		
+		return m, initCmd
+		
+	case "enter":
+		// 查看镜像详情
+		if m.imageListView != nil {
+			image := m.imageListView.GetSelectedImage()
+			if image != nil {
+				// 创建镜像详情视图
+				m.imageDetailsView = NewImageDetailsView(m.dockerClient, image)
+				m.imageDetailsView.SetSize(m.width, m.height)
+				m.previousView = m.currentView
+				m.currentView = ViewImageDetails
+				return m, m.imageDetailsView.Init()
+			}
+		}
+		return m, nil
+	}
+	
+	// 其他按键不处理，返回 nil 让消息传递给视图
+	return m, nil
+}
+
 // fillBackground 填充整个屏幕，确保每行宽度一致
 // 不强制设置背景色，让终端使用默认背景
 func (m Model) fillBackground(content string) string {
@@ -849,12 +930,24 @@ func (m Model) View() string {
 		} else {
 			content = "🧩 Compose 视图未初始化"
 		}
+	case ViewImageList:
+		if m.imageListView != nil {
+			content = m.imageListView.View()
+		} else {
+			content = "🖼️ 镜像列表视图未初始化"
+		}
+	case ViewImageDetails:
+		if m.imageDetailsView != nil {
+			content = m.imageDetailsView.View()
+		} else {
+			content = "🖼️ 镜像详情视图未初始化"
+		}
 	default:
 		content = "未知视图"
 	}
 	
-	// 添加分级消息显示（非容器列表和 Compose 列表视图）
-	if m.currentView != ViewContainerList && m.currentView != ViewComposeList {
+	// 添加分级消息显示（非容器列表、Compose 列表和镜像列表视图）
+	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewImageList {
 		if m.errorMsg != "" && m.dockerConnected {
 			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true)
 			content = "\n" + errorStyle.Render("❌ 致命错误: "+m.errorMsg) + "\n" + content
@@ -910,6 +1003,22 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			updatedView, cmd = m.composeListView.Update(msg)
 			if v, ok := updatedView.(*ComposeListView); ok {
 				m.composeListView = v
+			}
+		}
+	case ViewImageList:
+		if m.imageListView != nil {
+			var updatedView View
+			updatedView, cmd = m.imageListView.Update(msg)
+			if v, ok := updatedView.(*ImageListView); ok {
+				m.imageListView = v
+			}
+		}
+	case ViewImageDetails:
+		if m.imageDetailsView != nil {
+			var updatedView View
+			updatedView, cmd = m.imageDetailsView.Update(msg)
+			if v, ok := updatedView.(*ImageDetailsView); ok {
+				m.imageDetailsView = v
 			}
 		}
 	}
