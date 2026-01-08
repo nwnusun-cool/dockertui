@@ -4,11 +4,13 @@
 
 ## ✨ 特性
 
-- 🎨 **直观的终端界面** - 基于 Bubble Tea 框架的现代化 TUI 体验
-- 📋 **容器管理** - 查看容器列表、详情、实时日志
-- 🔍 **容器过滤** - 支持按状态、名称快速筛选容器
-- 💻 **交互式 Shell** - 直接进入容器执行命令
-- 📦 **Docker Compose 支持** - 管理本地 docker-compose 项目（开发中）
+- 🎨 **直观的终端界面** - 基于 Bubble Tea 框架的现代化 TUI 体验，使用 Lipgloss 自适应布局
+- 📋 **容器管理** - 查看容器列表、详情、实时日志，支持完整的容器生命周期操作
+- 🔍 **智能搜索** - 支持按名称、镜像、ID 快速搜索容器
+- 💻 **交互式 Shell** - 直接进入容器执行命令，退出后自动返回 TUI
+- 📊 **资源监控** - 实时查看容器 CPU、内存使用情况和 I/O 统计
+- ⚡ **事件驱动** - 自动监听 Docker 事件，实时更新容器状态
+- 🎯 **容器操作** - 启动、停止、重启、暂停、恢复、删除容器
 - 🚀 **跨平台** - 支持 Windows、Linux、macOS
 
 ## 🛠️ 技术栈
@@ -185,9 +187,14 @@ docktui-win64.exe
 | `Enter` | 查看容器详情 |
 | `l` | 查看容器日志 |
 | `r` | 手动刷新列表 |
-| `a` | 切换过滤模式（all/running/exited） |
 | `/` | 搜索容器（名称/镜像/ID） |
 | `s` | 进入容器 Shell |
+| `t` | 启动容器 |
+| `p` | 停止容器 |
+| `P` | 暂停/恢复容器 |
+| `R` | 重启容器 |
+| `Ctrl+D` | 删除容器（带确认） |
+| `Ctrl+A` | 批量操作（开发中） |
 | `?` | 显示帮助面板 |
 | `Esc` / `b` | 返回 |
 | `q` | 退出程序 |
@@ -203,6 +210,14 @@ docktui-win64.exe
 | `s` | 进入 Shell |
 | `r` | 刷新详情 |
 | `Esc` / `b` | 返回列表 |
+
+**标签页说明**:
+- 基本信息 - 容器 ID、名称、镜像、状态、重启策略等
+- 资源监控 - 实时 CPU/内存使用率、网络/磁盘 I/O（仅运行中容器）
+- 网络端口 - 端口映射和网络配置
+- 存储挂载 - 卷挂载和绑定挂载信息
+- 环境变量 - 应用和系统环境变量
+- 标签 - 自定义标签、Compose 标签、Docker 系统标签
 
 ### 日志视图
 
@@ -224,26 +239,37 @@ docktui-win64.exe
 ```
 demo1/
 ├── cmd/
-│   ├── docktui/              # 主程序入口
+│   ├── docktui/                    # 主程序入口
 │   │   └── main.go
-│   └── exec-shell-demo/      # Exec Shell 功能演示
-│       └── main.go
+│   └── *-demo/                     # 各功能演示程序
 ├── internal/
-│   ├── config/               # 配置管理
+│   ├── config/                     # 配置管理
 │   │   └── config.go
-│   ├── docker/               # Docker 客户端封装
-│   │   ├── client.go         # 客户端接口和实现
-│   │   ├── client_test.go    # 单元测试
-│   │   └── exec.go           # Exec Shell 功能
-│   └── ui/                   # TUI 界面
-│       └── ui.go             # Bubble Tea Model
+│   ├── docker/                     # Docker 客户端封装
+│   │   ├── client.go               # 客户端接口和实现
+│   │   ├── client_test.go          # 单元测试
+│   │   ├── exec.go                 # Exec Shell 功能
+│   │   ├── logs.go                 # 日志功能
+│   │   └── stats.go                # 资源统计功能
+│   └── ui/                         # TUI 界面
+│       ├── ui.go                   # Bubble Tea 主 Model
+│       ├── container_list_view.go  # 容器列表视图
+│       ├── container_detail_view.go # 容器详情视图
+│       ├── logs_view.go            # 日志视图
+│       ├── stats_view.go           # 资源监控视图
+│       ├── sparkline.go            # 图表组件
+│       └── keys.go                 # 快捷键定义
 ├── docs/
-│   ├── PRD.md               # 产品需求文档
-│   └── todo.md              # 详细任务清单
-├── go.mod                   # Go 模块定义
-├── go.sum                   # 依赖锁定
-├── run_local.bat            # 本地运行脚本（Windows）
-└── run_remote.bat           # 远程运行脚本（Windows）
+│   ├── PRD.md                      # 产品需求文档
+│   ├── todo.md                     # 详细任务清单
+│   ├── exec-shell-design.md        # Shell 功能设计文档
+│   └── refactoring-summary.md      # 重构总结
+├── go.mod                          # Go 模块定义
+├── go.sum                          # 依赖锁定
+├── build-linux.bat                 # Linux 构建脚本
+├── run-docktui.ps1                 # PowerShell 运行脚本
+├── run_local.bat                   # 本地运行脚本（Windows）
+└── run_remote.bat                  # 远程运行脚本（Windows）
 ```
 
 ## 🔧 配置
@@ -270,6 +296,12 @@ demo1/
 
 - ✅ **连接成功**: 正常显示所有功能
 - ❌ **连接失败**: 显示详细错误信息和解决建议，但不会立即退出
+
+### 错误提示机制
+
+- **严重错误**: 显示错误对话框，需要用户确认
+- **警告消息**: 顶部黄色提示，3秒后自动消失（如"容器已在运行中"）
+- **成功消息**: 顶部绿色提示，3秒后自动消失（如"启动容器成功"）
 
 ### 常见问题
 
@@ -315,6 +347,8 @@ newgrp docker
 - ✅ 容器日志 API (ContainerLogs)
 - ✅ Exec Shell API (ExecStart)
 - ✅ Docker 事件监听 (WatchEvents)
+- ✅ 容器操作 API (Start/Stop/Restart/Pause/Unpause/Remove)
+- ✅ 容器资源统计 API (Stats)
 - ✅ 远程 Docker 连接支持
 
 ### 前端 UI
@@ -323,63 +357,80 @@ newgrp docker
 - ✅ K9s 风格界面设计
   - ✅ vim 风格快捷键 (j/k/Enter/q/b)
   - ✅ Emoji 符号可视化
-  - ✅ 临时提示自动消失 (3-5秒)
+  - ✅ 临时提示自动消失 (3秒)
   - ✅ 帮助面板 (? 触发)
   - ✅ 动态快捷键提示
-  - ✅ 错误分级显示
+  - ✅ 错误分级显示（严重错误弹窗，警告消息顶部提示）
 - ✅ 容器列表视图
   - ✅ 使用 bubbles/table 组件
-  - ✅ 数据加载与显示
+  - ✅ 数据加载与显示（匹配 docker ps 格式）
   - ✅ 事件驱动自动刷新
-  - ✅ 状态色彩编码 (运行/停止/错误)
+  - ✅ 状态色彩编码（运行=绿色，暂停=黄色，停止=灰色，不健康=红色）
   - ✅ vim 风格导航 (j/k)
-  - ✅ 过滤功能 (a 键切换：all/running/exited)
   - ✅ 搜索功能 (/ 键搜索容器名称、镜像、ID)
+  - ✅ 动态列宽计算（自适应窗口大小）
+  - ✅ 友好的时间显示（"11 hours ago"）
 - ✅ 容器详情视图
-  - ✅ 标签页切换设计（基本信息、网络端口、存储挂载、环境变量）
-  - ✅ 左右箭头键切换标签页
+  - ✅ 标签页切换（基本信息、资源监控、网络端口、存储挂载、环境变量、标签）
+  - ✅ 左右箭头键/Tab 切换标签页
   - ✅ 分类展示详细信息
   - ✅ 状态着色（运行/停止/错误）
   - ✅ 智能信息分组和格式化
+  - ✅ 资源监控标签（CPU/内存图表，I/O 统计）
 - ✅ 日志视图
   - ✅ 使用 bubbles/viewport 组件
   - ✅ Follow 模式 (f 键切换)
   - ✅ 自动换行 (w 键切换)
   - ✅ 日志着色 (ERROR/WARN/INFO)
-  - ✅ vim 风格滚动 (j/k/g/G)
+  - ✅ vim 风格滚动 (j/k/g/G/Ctrl+d/Ctrl+u)
 - ✅ 帮助面板
   - ✅ 使用 bubbles/help + lipgloss 组件
   - ✅ K9s 风格布局
   - ✅ 分章节展示快捷键
-- 🚧 容器操作（启动/停止/重启/删除）
-- 🚧 进入容器 Shell (ExecShell)
+- ✅ 容器操作
+  - ✅ 启动容器 (t 键)
+  - ✅ 停止容器 (p 键)
+  - ✅ 重启容器 (R 键)
+  - ✅ 暂停/恢复容器 (P 键)
+  - ✅ 删除容器 (Ctrl+D，带确认对话框)
+  - ✅ 操作状态提示（成功/失败/警告）
+- ✅ 进入容器 Shell
+  - ✅ 交互式 Shell (s 键)
+  - ✅ 退出后自动返回 TUI
+  - ✅ 使用 docker exec 命令（兼容性更好）
+- 🚧 批量操作（Ctrl+A，开发中）
 - 🚧 Docker Compose 支持（计划中）
 
 详细任务清单请查看 [docs/todo.md](docs/todo.md)
 
 ## 🗺️ Roadmap
 
-### MVP 阶段（进行中）
+### MVP 阶段（基本完成）
 
 - [x] 基础架构设计
 - [x] Docker SDK 集成
-- [x] TUI 框架搭建
-- [x] 容器列表视图
-- [x] 容器详情视图
-- [x] 日志查看与跟踪
-- [x] 过滤与搜索功能
-- [ ] 交互式 Shell
-- [ ] 容器操作（启动/停止/重启/删除）
-- [ ] Docker Compose 项目管理
+- [x] TUI 框架搭建（Bubble Tea + Lipgloss）
+- [x] 容器列表视图（匹配 docker ps 格式）
+- [x] 容器详情视图（多标签页）
+- [x] 日志查看与跟踪（Follow 模式）
+- [x] 搜索功能（名称/镜像/ID）
+- [x] 交互式 Shell（docker exec）
+- [x] 容器操作（启动/停止/重启/暂停/恢复/删除）
+- [x] 资源监控（CPU/内存/I/O）
+- [x] 事件驱动自动刷新
+- [ ] 批量操作（开发中）
+- [ ] Docker Compose 项目管理（计划中）
 
 ### 未来计划
 
-- [ ] 镜像管理
-- [ ] 网络管理
-- [ ] 卷管理
-- [ ] 多主机支持
-- [ ] 配置文件支持
-- [ ] 主题定制
+- [ ] 镜像管理（列表、拉取、删除、构建）
+- [ ] 网络管理（列表、创建、删除）
+- [ ] 卷管理（列表、创建、删除）
+- [ ] 多主机支持（切换 Docker 主机）
+- [ ] 配置文件支持（保存常用设置）
+- [ ] 主题定制（颜色方案）
+- [ ] 容器日志导出
+- [ ] 容器快照/备份
 
 ## 🤝 贡献
 

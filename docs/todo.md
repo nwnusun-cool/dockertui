@@ -386,20 +386,6 @@
   - [✓] **31.3 O2.3：添加删除快捷键**  
     说明：在容器列表添加 `Ctrl+D` 快捷键触发删除，仅对已停止的容器生效。  
     依赖：31
-
-- [ ] **32 O3：高级容器操作**  
-  说明：实现暂停、重命名等高级操作。  
-  依赖：30
-  - [ ] **32.1 O3.1：实现 Pause/Unpause**  
-    说明：封装暂停和恢复容器的方法，添加 `P` 快捷键。  
-    依赖：32
-  - [ ] **32.2 O3.2：实现批量操作**  
-    说明：支持停止所有运行中的容器、删除所有已停止的容器等批量操作。  
-    依赖：32
-  - [ ] **32.3 O3.3：实现容器重命名**  
-    说明：在详情视图添加重命名功能，弹出输入框输入新名称。  
-    依赖：32
-
 ---
 
 ### 阶段 I：健壮性与用户体验（R 系列）
@@ -480,50 +466,241 @@
 
 > **注意**: 首页已重构为导航中心，预留了 Compose 项目入口 `[p]`，待实现后启用。
 
-- [ ] **36 C1：docker-compose 支持策略设计**  
+#### 功能设计建议
+
+**核心功能优先级**:
+1. **P0 (必须)**: 项目扫描、列表展示、基本操作（up/down/restart）、容器关联
+2. **P1 (重要)**: 项目详情、服务状态、日志查看、错误处理
+3. **P2 (可选)**: 开发模式、环境重置、配置管理、多文件支持
+
+**用户体验设计**:
+- 采用与容器列表类似的 vim 风格导航
+- 使用颜色区分项目状态（运行中=绿色，部分运行=黄色，停止=灰色）
+- 支持快速操作（单键启动/停止，无需确认对话框）
+- 提供项目→容器的双向跳转能力
+
+**技术实现要点**:
+- 优先使用 `docker compose`（Docker CLI v2），回退到 `docker-compose`（独立工具）
+- 通过容器 label `com.docker.compose.project` 识别项目归属
+- 支持多 compose 文件（docker-compose.yml + docker-compose.override.yml）
+- 异步执行长时间操作（up/down），避免阻塞 UI
+
+---
+
+- [✓] **36 C1：docker-compose 支持策略设计**  
   说明：明确本项目如何与 docker-compose 集成（命令行工具选择、参数约定、错误处理方式）。  
   依赖：2.3
-  - [ ] **36.1 C1.1：检测本机 docker CLI 支持方式**  
-    说明：实现检测逻辑，判断当前环境支持 `docker compose` 还是 `docker-compose`，并在配置中记录优先使用的命令。  
+  - [✓] **36.1 C1.1：检测本机 docker CLI 支持方式**  
+    说明：实现检测逻辑，判断当前环境支持 `docker compose` 还是 `docker-compose`，并在配置中记录优先使用的命令。优先级顺序：`docker compose` > `docker-compose` > 报错提示安装。  
+    **实现细节**:
+    - 使用 `exec.LookPath("docker")` 检测 docker 命令
+    - 执行 `docker compose version` 测试 compose 插件
+    - 如果失败，尝试 `docker-compose --version`
+    - 缓存检测结果到配置中，避免重复检测
     依赖：36
-  - [ ] **36.2 C1.2：定义统一的 Compose 命令封装接口**  
-    说明：在合适的包中定义接口（如 `RunCompose(project, args...)`），内部通过 `os/exec` 调用 CLI，并统一处理 stdout/stderr/退出码。  
+  - [✓] **36.2 C1.2：定义统一的 Compose 命令封装接口**  
+    说明：在 `internal/compose` 包中定义接口（如 `ComposeClient`），内部通过 `os/exec` 调用 CLI，并统一处理 stdout/stderr/退出码。  
+    **接口设计**:
+    ```go
+    type ComposeClient interface {
+        // 项目操作
+        Up(ctx context.Context, project *Project, opts UpOptions) error
+        Down(ctx context.Context, project *Project, opts DownOptions) error
+        Restart(ctx context.Context, project *Project, services []string) error
+        Stop(ctx context.Context, project *Project, services []string) error
+        Start(ctx context.Context, project *Project, services []string) error
+        
+        // 信息查询
+        PS(ctx context.Context, project *Project) ([]Service, error)
+        Logs(ctx context.Context, project *Project, opts LogOptions) (io.ReadCloser, error)
+        Config(ctx context.Context, project *Project) (*ProjectConfig, error)
+        
+        // 工具方法
+        Version(ctx context.Context) (string, error)
+    }
+    ```
     依赖：36
 
-- [ ] **37 C2：Compose 项目与配置模型**  
+- [✓] **37 C2：Compose 项目与配置模型**  
   说明：为 docker-compose 项目定义基础数据模型，并与配置模块关联。  
   依赖：6, 36
-  - [ ] **37.1 C2.1：定义 ComposeProject 结构体**  
+  - [✓] **37.1 C2.1：定义 ComposeProject 结构体**  
     说明：包含项目名称、路径、compose 文件列表、可选 env 文件、标签等字段，作为 UI 和命令调用的统一输入。  
+    **数据结构设计**:
+    ```go
+    type Project struct {
+        Name          string            // 项目名称（从目录名或 compose 文件推断）
+        Path          string            // 项目根目录绝对路径
+        ComposeFiles  []string          // compose 文件列表（相对路径）
+        EnvFiles      []string          // 环境变量文件列表
+        WorkingDir    string            // 工作目录
+        Labels        map[string]string // 项目标签
+        
+        // 运行时状态
+        Services      []Service         // 服务列表（从 ps 获取）
+        Status        ProjectStatus     // 项目状态（Running/PartialRunning/Stopped）
+        LastUpdated   time.Time         // 最后更新时间
+    }
+    
+    type Service struct {
+        Name       string
+        State      string  // running/exited/restarting
+        Containers []string // 容器 ID 列表
+    }
+    
+    type ProjectStatus int
+    const (
+        StatusUnknown ProjectStatus = iota
+        StatusRunning      // 所有服务运行中
+        StatusPartial      // 部分服务运行中
+        StatusStopped      // 所有服务已停止
+        StatusError        // 错误状态
+    )
+    ```
     依赖：37
-  - [ ] **37.2 C2.2：在配置中预留 compose 相关字段**  
-    说明：在配置 struct 中增加 compose 相关配置（如忽略路径、默认 env 文件、默认命令超时），与现有配置加载逻辑集成。  
+  - [✓] **37.2 C2.2：在配置中预留 compose 相关字段**  
+    说明：在配置 struct 中增加 compose 相关配置（如扫描路径、忽略规则、默认 env 文件、命令超时），与现有配置加载逻辑集成。  
+    **配置字段**:
+    ```go
+    type ComposeConfig struct {
+        ScanPaths      []string          // 扫描路径（默认当前目录）
+        IgnorePatterns []string          // 忽略模式（如 node_modules, .git）
+        MaxDepth       int               // 最大扫描深度（默认 5）
+        DefaultEnvFile string            // 默认环境变量文件
+        CommandTimeout time.Duration     // 命令超时（默认 60s）
+        AutoRefresh    bool              // 是否自动刷新（默认 false）
+    }
+    ```
     依赖：37
 
-- [ ] **38 C3：Compose 项目扫描**  
+- [✓] **38 C3：Compose 项目扫描**  
   说明：实现文件系统扫描，自动发现 docker-compose 项目。  
   依赖：37
-  - [ ] **38.1 C3.1：实现 compose 文件扫描逻辑**  
-    说明：从当前工作目录及子目录递归扫描 `docker-compose.yml` / `docker-compose.*.yml` 文件，将其归类为 ComposeProject。  
+  - [✓] **38.1 C3.1：实现 compose 文件扫描逻辑**  
+    说明：从配置的扫描路径递归扫描 compose 文件，支持多种命名模式。  
+    **扫描规则**:
+    - 文件名模式：`docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, `compose.yaml`
+    - 支持多文件：`docker-compose.override.yml`, `docker-compose.*.yml`
+    - 项目识别：同一目录下的 compose 文件归为一个项目
+    - 项目名称：优先使用 compose 文件中的 `name` 字段，否则使用目录名
+    **实现要点**:
+    - 使用 `filepath.Walk` 递归遍历
+    - 尊重 `.dockerignore` 和配置的忽略规则
+    - 限制扫描深度，避免扫描过深
+    - 异步扫描，避免阻塞 UI
     依赖：38
-  - [ ] **38.2 C3.2：实现扫描结果去重与忽略规则**  
+  - [✓] **38.2 C3.2：实现扫描结果去重与忽略规则**  
     说明：根据配置中的忽略路径、隐藏规则，对扫描得到的项目进行过滤与去重。  
+    **过滤规则**:
+    - 忽略隐藏目录（以 `.` 开头）
+    - 忽略常见依赖目录：`node_modules`, `vendor`, `.git`, `__pycache__`
+    - 支持自定义 glob 模式：`**/test/**`, `**/tmp/**`
+    - 去重：同一目录只保留一个项目
     依赖：38
-  - [ ] **38.3 C3.3：提供刷新扫描的公共 API**  
+  - [✓] **38.3 C3.3：提供刷新扫描的公共 API**  
     说明：封装函数供 UI 调用，以在运行时重新扫描 compose 项目列表。  
+    **API 设计**:
+    ```go
+    type Scanner interface {
+        // 扫描项目
+        Scan(ctx context.Context, paths []string) ([]Project, error)
+        
+        // 刷新单个项目状态
+        RefreshProject(ctx context.Context, project *Project) error
+        
+        // 监听文件变化（可选）
+        Watch(ctx context.Context, paths []string) (<-chan ScanEvent, error)
+    }
+    ```
     依赖：38
 
-- [ ] **39 C4：Compose 项目操作 API**  
+- [✓] **39 C4：Compose 项目操作 API**  
   说明：基于 CLI 封装项目级操作（up/down/restart/logs 等）。  
   依赖：36, 38
-  - [ ] **39.1 C4.1：实现 ProjectUp 调用**  
-    说明：封装 `docker compose up -d`（或等价命令），支持传入项目路径和额外参数，返回标准化结果。  
+  - [✓] **39.1 C4.1：实现 ProjectUp 调用**  
+    说明：封装 `docker compose up -d`，支持传入项目路径和额外参数，返回标准化结果。  
+    **功能要求**:
+    - 支持后台启动（-d）和前台启动
+    - 支持指定服务列表（只启动部分服务）
+    - 支持强制重建（--build, --force-recreate）
+    - 支持拉取最新镜像（--pull always）
+    - 返回操作结果和输出日志
+    **错误处理**:
+    - 镜像不存在 → 提示拉取或构建
+    - 端口冲突 → 显示冲突端口和占用容器
+    - 网络错误 → 显示详细网络信息
+    - 配置错误 → 显示 compose 文件验证错误
     依赖：39
-  - [ ] **39.2 C4.2：实现 ProjectDown/Restart/Logs 调用**  
-    说明：封装 `down`、`restart`、`logs` 等操作，确保可被 UI 方便调用，并处理常见错误（如命令不存在、项目目录错误）。  
+  - [ ] **39.2 C4.2：实现 ProjectDown/Restart/Stop/Start 调用**  
+    说明：封装常用操作，确保可被 UI 方便调用，并处理常见错误。  
+    **操作列表**:
+    - `Down`: 停止并删除容器、网络（可选删除卷）
+    - `Restart`: 重启服务（支持指定服务）
+    - `Stop`: 停止服务但不删除容器
+    - `Start`: 启动已存在的容器
+    - `Pause/Unpause`: 暂停/恢复服务
+    - `Pull`: 拉取服务镜像
+    - `Build`: 构建服务镜像
+    **参数设计**:
+    ```go
+    type UpOptions struct {
+        Detach       bool     // 后台运行
+        Build        bool     // 构建镜像
+        ForceRecreate bool    // 强制重建
+        Services     []string // 指定服务
+        Timeout      int      // 超时时间（秒）
+    }
+    
+    type DownOptions struct {
+        RemoveVolumes  bool   // 删除卷
+        RemoveOrphans  bool   // 删除孤立容器
+        Timeout        int    // 超时时间
+    }
+    ```
     依赖：39
-  - [ ] **39.3 C4.3：定义操作结果与错误结构**  
-    说明：为 compose 操作定义结果结构体（包含 stdout 片段、错误消息、退出码等），方便 UI 展示。  
+  - [ ] **39.3 C4.3：实现 Logs 和 PS 查询**  
+    说明：实现日志查看和服务状态查询功能。  
+    **Logs 功能**:
+    - 支持 follow 模式（实时跟踪）
+    - 支持指定服务（查看单个服务日志）
+    - 支持时间戳显示
+    - 支持行数限制（--tail）
+    - 返回 io.ReadCloser 供 UI 读取
+    **PS 功能**:
+    - 查询项目所有服务状态
+    - 返回服务名称、状态、容器数量
+    - 支持过滤（只看运行中的服务）
+    依赖：39
+  - [ ] **39.4 C4.4：定义操作结果与错误结构**  
+    说明：为 compose 操作定义统一的结果和错误类型，方便 UI 展示。  
+    **结构设计**:
+    ```go
+    type OperationResult struct {
+        Success    bool
+        Message    string
+        Output     string   // stdout 输出
+        Error      string   // stderr 输出
+        ExitCode   int
+        Duration   time.Duration
+    }
+    
+    type ComposeError struct {
+        Type       ErrorType  // ConfigError/NetworkError/ImageError/RuntimeError
+        Message    string
+        Details    string
+        Suggestion string     // 解决建议
+    }
+    
+    type ErrorType int
+    const (
+        ErrorUnknown ErrorType = iota
+        ErrorConfig        // compose 文件配置错误
+        ErrorNetwork       // 网络错误（端口冲突等）
+        ErrorImage         // 镜像相关错误
+        ErrorRuntime       // 运行时错误
+        ErrorPermission    // 权限错误
+    )
+    ```
     依赖：39
 
 - [ ] **40 C5：Compose 项目视图（列表）**  
@@ -531,12 +708,83 @@
   依赖：15, 38, 39
   - [ ] **40.1 C5.1：定义 ComposeProjectListModel**  
     说明：在 UI 层定义保存 compose 项目列表、选中索引、加载状态、错误信息的 model。  
+    **Model 结构**:
+    ```go
+    type ComposeListView struct {
+        composeClient compose.Client
+        scanner       compose.Scanner
+        
+        width  int
+        height int
+        
+        // 数据状态
+        projects         []compose.Project
+        filteredProjects []compose.Project
+        tableModel       table.Model
+        loading          bool
+        errorMsg         string
+        successMsg       string
+        
+        // 搜索状态
+        searchQuery string
+        isSearching bool
+        
+        // 操作状态
+        operatingProject *compose.Project  // 正在操作的项目
+        operationType    string            // up/down/restart
+        
+        keys KeyMap
+    }
+    ```
     依赖：40
   - [ ] **40.2 C5.2：实现列表布局与快捷键**  
-    说明：实现项目列表渲染（显示名称、路径、服务数量等），支持 `j/k` 或方向键移动、`Enter` 进入详情、`u` up、`d` down、`l` 查看项目日志等快捷键。  
+    说明：实现项目列表渲染，支持 vim 风格导航和快捷操作。  
+    **列表列定义**:
+    - PROJECT NAME（项目名称）
+    - PATH（项目路径，截断显示）
+    - SERVICES（服务数量，如 "3/5" 表示 3 个运行中，共 5 个）
+    - STATUS（项目状态：Running/Partial/Stopped）
+    - COMPOSE FILES（compose 文件数量）
+    **快捷键设计**:
+    - `j/k/↑/↓`: 上下移动
+    - `Enter`: 查看项目详情
+    - `u`: 启动项目（docker compose up -d）
+    - `d`: 停止项目（docker compose down）
+    - `r`: 重启项目（docker compose restart）
+    - `s`: 停止但不删除（docker compose stop）
+    - `t`: 启动已停止的容器（docker compose start）
+    - `l`: 查看项目日志
+    - `c`: 跳转到项目容器列表
+    - `b`: 构建镜像（docker compose build）
+    - `p`: 拉取镜像（docker compose pull）
+    - `R`: 刷新列表（重新扫描）
+    - `/`: 搜索项目
+    - `Esc/b`: 返回主页
+    - `q`: 退出程序
+    **状态栏设计**:
+    - 第一行：Docker Compose 版本 + 基本操作（刷新、搜索）
+    - 第二行：项目操作（启动、停止、重启）
+    - 第三行：高级操作（构建、拉取、日志、容器）
+    - 第四行：导航提示（vim 风格）
     依赖：40
-  - [ ] **40.3 C5.3：在主 Model 中集成 Compose 视图**  
-    说明：在主视图管理中加入 compose 视图，并在首页/全局快捷键中提供进入 compose 视图的入口。  
+  - [ ] **40.3 C5.3：实现项目状态刷新机制**  
+    说明：定期或手动刷新项目状态，更新服务运行情况。  
+    **刷新策略**:
+    - 手动刷新：按 `R` 键重新扫描项目
+    - 自动刷新：可选，每 10 秒刷新一次状态（不重新扫描文件）
+    - 操作后刷新：执行 up/down 等操作后自动刷新
+    **状态更新**:
+    - 调用 `compose ps` 获取服务状态
+    - 更新项目的 Services 和 Status 字段
+    - 使用颜色标识状态变化
+    依赖：40
+  - [ ] **40.4 C5.4：在主 Model 中集成 Compose 视图**  
+    说明：在主视图管理中加入 compose 视图，并提供入口。  
+    **集成要点**:
+    - 在欢迎页面添加 `p` 键进入 Compose 项目列表
+    - 在全局快捷键中添加 `p` 切换到 Compose 视图
+    - 支持从 Compose 视图返回欢迎页面
+    - 支持从 Compose 视图跳转到容器列表
     依赖：40, 15
 
 - [ ] **41 C6：Compose 与容器视图联动**  
@@ -561,3 +809,179 @@
   - [ ] **42.3 C7.3：实现“一键本地环境重置”操作**  
     说明：封装停止容器、删除相关容器/网络/volume 并重新 `up` 的组合操作，与日志/错误展示机制集成。  
     依赖：42
+
+- [ ] **41 C6：Compose 项目详情视图**  
+  说明：提供单个项目的详细信息展示，包括服务列表、配置信息等。  
+  依赖：40, 39
+  - [ ] **41.1 C6.1：定义项目详情 Model**  
+    说明：创建详情视图的数据模型，支持标签页切换。  
+    **标签页设计**:
+    - 服务列表（Services）：显示所有服务及其状态
+    - 配置信息（Config）：显示 compose 文件内容（格式化）
+    - 网络（Networks）：显示项目创建的网络
+    - 卷（Volumes）：显示项目创建的卷
+    - 环境变量（Environment）：显示项目级环境变量
+    依赖：41
+  - [ ] **41.2 C6.2：实现服务列表标签页**  
+    说明：展示项目中所有服务的详细状态。  
+    **显示内容**:
+    - 服务名称
+    - 镜像名称
+    - 状态（Running/Exited/Restarting）
+    - 容器数量（副本数）
+    - 端口映射
+    **快捷键**:
+    - `Enter`: 跳转到服务的容器
+    - `l`: 查看服务日志
+    - `r`: 重启服务
+    - `s`: 停止服务
+    - `t`: 启动服务
+    依赖：41
+  - [ ] **41.3 C6.3：实现配置信息标签页**  
+    说明：显示 compose 文件的内容，支持语法高亮。  
+    **功能要求**:
+    - 显示所有 compose 文件（主文件 + override 文件）
+    - YAML 语法高亮（使用 lipgloss）
+    - 支持滚动查看
+    - 显示文件路径
+    依赖：41
+
+- [ ] **42 C7：Compose 与容器视图联动**  
+  说明：实现从 compose 项目跳转到对应容器列表，以及容器视图按项目过滤。  
+  依赖：9, 18, 38
+  - [ ] **42.1 C7.1：实现按 Compose 项目过滤容器列表**  
+    说明：基于容器 label 规则，从 Docker 容器列表中筛选出属于某个 compose 项目的容器。  
+    **过滤逻辑**:
+    - 检查容器 label `com.docker.compose.project`
+    - 匹配项目名称（不区分大小写）
+    - 支持显示项目名称在容器列表标题栏
+    - 支持清除过滤返回完整列表
+    依赖：42
+  - [ ] **42.2 C7.2：在 Compose 视图中添加跳转容器列表的快捷键**  
+    说明：在 Compose 项目列表和详情视图中添加快捷键（`c`），跳转到仅显示该项目容器的容器列表视图。  
+    **跳转流程**:
+    1. 用户在项目列表按 `c`
+    2. 切换到容器列表视图
+    3. 自动应用项目过滤
+    4. 显示过滤提示（如 "Showing containers for project: myapp"）
+    5. 支持按 `Esc` 清除过滤返回完整列表
+    依赖：42
+  - [ ] **42.3 C7.3：在容器详情中显示所属项目**  
+    说明：如果容器属于某个 compose 项目，在详情视图中显示项目信息。  
+    **显示内容**:
+    - 项目名称（可点击跳转到项目列表）
+    - 服务名称
+    - 项目路径
+    - 在基本信息标签页中添加 "Compose Project" 字段
+    依赖：42
+
+- [ ] **43 C8：Compose 日志视图**  
+  说明：实现 compose 项目和服务的日志查看功能。  
+  依赖：39, 26
+  - [ ] **43.1 C8.1：实现项目级日志查看**  
+    说明：查看项目所有服务的聚合日志。  
+    **功能要求**:
+    - 显示所有服务的日志（带服务名前缀）
+    - 支持 follow 模式
+    - 支持按服务名过滤
+    - 支持颜色区分不同服务
+    - 复用现有日志视图组件
+    依赖：43
+  - [ ] **43.2 C8.2：实现服务级日志查看**  
+    说明：查看单个服务的日志。  
+    **功能要求**:
+    - 从服务列表或详情页进入
+    - 显示服务名称和容器数量
+    - 如果服务有多个副本，聚合显示
+    - 支持切换到单个容器日志
+    依赖：43
+
+- [ ] **44 C9：本地开发友好能力**  
+  说明：为本地开发场景提供便捷功能。  
+  依赖：37, 39, 9, 32
+  - [ ] **44.1 C9.1：实现环境重置功能**  
+    说明：一键停止并清理项目环境，然后重新启动。  
+    **操作流程**:
+    1. 停止所有容器（docker compose down）
+    2. 可选：删除卷（--volumes）
+    3. 可选：删除镜像（--rmi all）
+    4. 重新启动（docker compose up -d）
+    **快捷键**: `Ctrl+R` 在项目列表或详情页触发
+    **确认对话框**: 显示将要删除的资源，需要用户确认
+    依赖：44
+  - [ ] **44.2 C9.2：实现快速重建功能**  
+    说明：重新构建镜像并启动服务。  
+    **操作流程**:
+    1. 构建镜像（docker compose build）
+    2. 重新创建容器（docker compose up -d --force-recreate）
+    **快捷键**: `Ctrl+B` 在项目列表或详情页触发
+    **进度显示**: 显示构建进度和输出
+    依赖：44
+  - [ ] **44.3 C9.3：实现开发模式配置**  
+    说明：支持为项目配置开发模式参数。  
+    **配置内容**:
+    - 额外的 compose 文件（如 docker-compose.dev.yml）
+    - 额外的环境变量文件
+    - 自动挂载代码目录
+    - 启用热重载
+    **配置方式**: 在项目目录创建 `.docktui.yml` 配置文件
+    依赖：44
+
+- [ ] **45 C10：错误处理与用户体验优化**  
+  说明：完善 compose 功能的错误处理和用户体验。  
+  依赖：39, 40
+  - [ ] **45.1 C10.1：实现友好的错误提示**  
+    说明：针对常见错误提供清晰的提示和解决建议。  
+    **错误场景**:
+    - Compose 文件语法错误 → 显示错误行号和内容
+    - 端口冲突 → 显示冲突端口和占用进程
+    - 镜像不存在 → 提示拉取或构建
+    - 网络冲突 → 显示冲突网络信息
+    - 权限不足 → 提示需要的权限
+    依赖：45
+  - [ ] **45.2 C10.2：实现操作进度显示**  
+    说明：对于耗时操作，显示进度和状态。  
+    **进度显示**:
+    - 启动项目：显示正在启动的服务
+    - 构建镜像：显示构建步骤和进度
+    - 拉取镜像：显示下载进度
+    - 停止项目：显示正在停止的服务
+    **实现方式**: 使用 spinner 或进度条组件
+    依赖：45
+  - [ ] **45.3 C10.3：实现操作历史记录**  
+    说明：记录用户对项目的操作历史。  
+    **记录内容**:
+    - 操作类型（up/down/restart）
+    - 操作时间
+    - 操作结果（成功/失败）
+    - 错误信息（如果失败）
+    **展示方式**: 在项目详情页添加 "History" 标签页
+    依赖：45
+
+---
+
+### 阶段 K 总结
+
+**实现顺序建议**:
+1. **第一阶段（基础）**: C1 → C2 → C3 → C4（核心 API）
+2. **第二阶段（UI）**: C5（项目列表）→ C6（项目详情）
+3. **第三阶段（集成）**: C7（容器联动）→ C8（日志）
+4. **第四阶段（优化）**: C9（开发功能）→ C10（体验优化）
+
+**预计工作量**:
+- 基础 API 层：3-5 天
+- UI 视图层：5-7 天
+- 集成与优化：3-5 天
+- 总计：11-17 天
+
+**技术难点**:
+1. Compose 文件解析和验证
+2. 多服务日志聚合和颜色区分
+3. 长时间操作的进度反馈
+4. 容器与项目的双向关联
+
+**测试建议**:
+- 准备多个测试项目（单服务、多服务、带网络、带卷）
+- 测试各种错误场景（端口冲突、镜像缺失、配置错误）
+- 测试性能（大量项目扫描、频繁刷新）
+- 测试跨平台兼容性（Windows/Linux/macOS）

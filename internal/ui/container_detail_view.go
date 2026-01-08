@@ -127,144 +127,44 @@ func (v *ContainerDetailView) handleTabChange(oldTab, newTab int) tea.Cmd {
 
 // View 渲染视图
 func (v *ContainerDetailView) View() string {
-	var s strings.Builder
+	// 渲染各部分
+	header := v.renderHeader()
+	footer := v.renderKeyHints()
 	
-	s.WriteString(v.renderHeader())
+	// 计算内容区域可用高度
+	headerHeight := strings.Count(header, "\n") + 1
+	footerHeight := strings.Count(footer, "\n") + 1
+	contentHeight := v.height - headerHeight - footerHeight
+	if contentHeight < 10 {
+		contentHeight = 10
+	}
 	
+	var content string
 	if v.loading {
-		s.WriteString(v.renderStateBox("⏳ 正在加载...", "请稍候，正在获取容器详情"))
-		s.WriteString(v.renderKeyHints())
-		return s.String()
+		content = v.renderCenteredState("⏳ 正在加载...", "请稍候，正在获取容器详情", contentHeight)
+	} else if v.errorMsg != "" {
+		content = v.renderCenteredState("❌ 加载失败", v.errorMsg, contentHeight)
+	} else if v.details == nil {
+		content = v.renderCenteredState("📭 暂无数据", "按 r 重新加载", contentHeight)
+	} else {
+		tabBar := v.renderTabBar()
+		tabBarHeight := strings.Count(tabBar, "\n") + 1
+		tabContent := v.renderTabContent(contentHeight - tabBarHeight)
+		content = tabBar + tabContent
 	}
 	
-	if v.errorMsg != "" {
-		s.WriteString(v.renderStateBox("❌ 加载失败", v.errorMsg))
-		s.WriteString(v.renderKeyHints())
-		return s.String()
-	}
-	
-	if v.details == nil {
-		s.WriteString(v.renderStateBox("📭 暂无数据", "按 r 重新加载"))
-		s.WriteString(v.renderKeyHints())
-		return s.String()
-	}
-	
-	s.WriteString(v.renderTabBar())
-	s.WriteString(v.renderTabContent())
-	s.WriteString(v.renderKeyHints())
-	
-	return s.String()
+	// 组合布局：header + content + footer
+	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
 
-// renderHeader 渲染顶部标题栏
-func (v *ContainerDetailView) renderHeader() string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Padding(0, 1)
-	
-	infoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-	
-	if v.details == nil {
-		title := titleStyle.Render("📋 " + v.containerName)
-		return "\n  " + title + "\n"
-	}
-	
-	// 状态徽章
-	var statusStyle lipgloss.Style
-	var statusText string
-	switch v.details.State {
-	case "running":
-		statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("34")).
-			Bold(true).
-			Padding(0, 1)
-		statusText = "▶ RUNNING"
-	case "exited":
-		statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("240")).
-			Bold(true).
-			Padding(0, 1)
-		statusText = "■ STOPPED"
-	default:
-		statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("124")).
-			Bold(true).
-			Padding(0, 1)
-		statusText = "✗ " + strings.ToUpper(v.details.State)
-	}
-	
-	title := titleStyle.Render("📋 " + v.details.Name)
-	status := statusStyle.Render(statusText)
-	
-	// 副标题信息
-	shortID := v.details.ID
-	if len(shortID) > 12 {
-		shortID = shortID[:12]
-	}
-	subInfo := infoStyle.Render(fmt.Sprintf("%s  │  %s  │  %s",
-		shortID,
-		v.truncate(v.details.Image, 25),
-		v.details.Created.Format("2006-01-02 15:04"),
-	))
-	
-	return "\n  " + title + "  " + status + "\n  " + subInfo + "\n"
-}
-
-// renderTabBar 渲染标签页导航
-func (v *ContainerDetailView) renderTabBar() string {
-	tabs := []string{"基本信息", "资源监控", "网络端口", "存储挂载", "环境变量", "标签"}
-	
-	activeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(true).
-		Padding(0, 2)
-	
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
-		Background(lipgloss.Color("238")).
-		Padding(0, 2)
-	
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-	
-	var parts []string
-	for i, tab := range tabs {
-		if i == v.currentTab {
-			parts = append(parts, activeStyle.Render(tab))
-		} else {
-			parts = append(parts, inactiveStyle.Render(tab))
-		}
-	}
-	
-	tabLine := strings.Join(parts, separatorStyle.Render(" "))
-	
-	// 底部分隔线
-	lineWidth := v.width - 4
-	if lineWidth < 60 {
-		lineWidth = 60
-	}
-	line := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render(strings.Repeat("─", lineWidth))
-	
-	return "\n  " + tabLine + "\n  " + line + "\n"
-}
-
-// renderStateBox 渲染状态提示框
-func (v *ContainerDetailView) renderStateBox(title, message string) string {
+// renderCenteredState 渲染居中的状态提示（加载中/错误/空数据）
+func (v *ContainerDetailView) renderCenteredState(title, message string, availableHeight int) string {
 	boxWidth := v.width - 8
 	if boxWidth < 50 {
 		boxWidth = 50
 	}
-	if boxWidth > 80 {
-		boxWidth = 80
+	if boxWidth > 70 {
+		boxWidth = 70
 	}
 	
 	boxStyle := lipgloss.NewStyle().
@@ -282,49 +182,141 @@ func (v *ContainerDetailView) renderStateBox(title, message string) string {
 		Foreground(lipgloss.Color("245"))
 	
 	content := titleStyle.Render(title) + "\n\n" + msgStyle.Render(message)
+	box := boxStyle.Render(content)
 	
-	return "\n  " + boxStyle.Render(content) + "\n"
+	// 计算垂直居中的填充
+	boxHeight := strings.Count(box, "\n") + 1
+	paddingTop := (availableHeight - boxHeight) / 2
+	if paddingTop < 1 {
+		paddingTop = 1
+	}
+	
+	// 水平居中
+	centeredBox := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(box)
+	
+	return strings.Repeat("\n", paddingTop) + centeredBox
 }
 
-// renderTabContent 渲染标签页内容
-func (v *ContainerDetailView) renderTabContent() string {
-	switch v.currentTab {
-	case 0:
-		return v.renderBasicInfo()
-	case 1:
-		return v.renderStatsTab()
-	case 2:
-		return v.renderNetworkInfo()
-	case 3:
-		return v.renderStorageInfo()
-	case 4:
-		return v.renderEnvInfo()
-	case 5:
-		return v.renderLabelsInfo()
+// renderHeader 渲染顶部标题栏
+func (v *ContainerDetailView) renderHeader() string {
+	headerStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("236")).
+		Width(v.width).
+		Padding(0, 1)
+	
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("220"))
+	
+	infoStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245"))
+	
+	if v.details == nil {
+		title := titleStyle.Render("📋 " + v.containerName)
+		return headerStyle.Render(title)
+	}
+	
+	// 状态徽章
+	var statusStyle lipgloss.Style
+	var statusText string
+	switch v.details.State {
+	case "running":
+		statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("82")).
+			Bold(true)
+		statusText = "● RUNNING"
+	case "exited":
+		statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245"))
+		statusText = "■ STOPPED"
+	case "paused":
+		statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("220"))
+		statusText = "❚❚ PAUSED"
 	default:
-		return v.renderBasicInfo()
-	}
-}
-
-// renderStatsTab 渲染资源监控标签页
-func (v *ContainerDetailView) renderStatsTab() string {
-	// 检查容器是否运行中
-	if v.details != nil && v.details.State != "running" {
-		return v.renderStateBox("⚠️ 容器未运行", "资源监控仅在容器运行时可用")
+		statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("196"))
+		statusText = "✗ " + strings.ToUpper(v.details.State)
 	}
 	
-	v.statsView.SetSize(v.width, v.height-10)
-	return v.statsView.Render()
+	// 第一行：名称 + 状态
+	title := titleStyle.Render("📋 " + v.details.Name)
+	status := statusStyle.Render(statusText)
+	line1 := title + "  " + status
+	
+	// 第二行：ID + 镜像 + 创建时间
+	shortID := v.details.ID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	
+	// 根据宽度决定显示多少信息
+	var line2 string
+	if v.width > 80 {
+		line2 = infoStyle.Render(fmt.Sprintf("ID: %s  │  镜像: %s  │  创建: %s",
+			shortID,
+			v.truncate(v.details.Image, 30),
+			v.details.Created.Format("2006-01-02 15:04"),
+		))
+	} else {
+		line2 = infoStyle.Render(fmt.Sprintf("ID: %s  │  %s", shortID, v.truncate(v.details.Image, 20)))
+	}
+	
+	content := line1 + "\n" + line2
+	return headerStyle.Render(content)
+}
+
+// renderTabBar 渲染标签页导航
+func (v *ContainerDetailView) renderTabBar() string {
+	tabs := []string{"基本信息", "资源监控", "网络端口", "存储挂载", "环境变量", "标签"}
+	
+	// 根据宽度决定是否使用简短标签
+	if v.width < 80 {
+		tabs = []string{"基本", "资源", "网络", "存储", "环境", "标签"}
+	}
+	
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(true).
+		Padding(0, 1)
+	
+	inactiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Background(lipgloss.Color("238")).
+		Padding(0, 1)
+	
+	var parts []string
+	for i, tab := range tabs {
+		if i == v.currentTab {
+			parts = append(parts, activeStyle.Render(tab))
+		} else {
+			parts = append(parts, inactiveStyle.Render(tab))
+		}
+	}
+	
+	tabLine := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	
+	// 底部分隔线
+	lineWidth := v.width - 2
+	if lineWidth < 40 {
+		lineWidth = 40
+	}
+	line := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render(strings.Repeat("─", lineWidth))
+	
+	return " " + tabLine + "\n " + line + "\n"
 }
 
 // renderBasicInfo 渲染基本信息
 func (v *ContainerDetailView) renderBasicInfo() string {
-	boxWidth := v.width - 8
-	if boxWidth < 60 {
-		boxWidth = 60
+	boxWidth := v.width - 4
+	if boxWidth < 50 {
+		boxWidth = 50
 	}
-	if boxWidth > 100 {
-		boxWidth = 100
+	if boxWidth > 90 {
+		boxWidth = 90
 	}
 	
 	boxStyle := lipgloss.NewStyle().
@@ -359,7 +351,48 @@ func (v *ContainerDetailView) renderBasicInfo() string {
 		row("网络模式", v.details.NetworkMode),
 	)
 	
-	return "\n  " + boxStyle.Render(content) + "\n"
+	box := boxStyle.Render(content)
+	return "\n" + lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(box) + "\n"
+}
+
+// renderTabContent 渲染标签页内容
+func (v *ContainerDetailView) renderTabContent(availableHeight int) string {
+	var content string
+	switch v.currentTab {
+	case 0:
+		content = v.renderBasicInfo()
+	case 1:
+		content = v.renderStatsTab(availableHeight)
+	case 2:
+		content = v.renderNetworkInfo()
+	case 3:
+		content = v.renderStorageInfo()
+	case 4:
+		content = v.renderEnvInfo()
+	case 5:
+		content = v.renderLabelsInfo()
+	default:
+		content = v.renderBasicInfo()
+	}
+	
+	// 确保内容区域填满可用高度
+	contentHeight := strings.Count(content, "\n") + 1
+	if contentHeight < availableHeight {
+		content += strings.Repeat("\n", availableHeight-contentHeight)
+	}
+	
+	return content
+}
+
+// renderStatsTab 渲染资源监控标签页
+func (v *ContainerDetailView) renderStatsTab(availableHeight int) string {
+	// 检查容器是否运行中
+	if v.details != nil && v.details.State != "running" {
+		return v.renderCenteredState("⚠️ 容器未运行", "资源监控仅在容器运行时可用", availableHeight)
+	}
+	
+	v.statsView.SetSize(v.width, availableHeight)
+	return v.statsView.Render()
 }
 
 // renderNetworkInfo 渲染网络信息
@@ -658,31 +691,45 @@ func (v *ContainerDetailView) renderLabelsInfo() string {
 	return s.String()
 }
 
-// renderKeyHints 渲染底部快捷键提示
+// renderKeyHints 渲染底部快捷键提示（固定在底部）
 func (v *ContainerDetailView) renderKeyHints() string {
-	// 使用 lipgloss 自适应布局
-	availableWidth := v.width - 4
-	if availableWidth < 80 {
-		availableWidth = 80
-	}
+	footerStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("236")).
+		Width(v.width).
+		Padding(0, 1)
 	
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
+		Foreground(lipgloss.Color("81")).
+		Bold(true)
 	
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+		Foreground(lipgloss.Color("252"))
 	
-	sepStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-	
-	// 构建快捷键提示
-	items := []struct{ key, desc string }{
-		{"←/→", "切换标签"},
-		{"l", "日志"},
-		{"s", "终端"},
-		{"r", "刷新"},
-		{"Esc", "返回"},
-		{"q", "退出"},
+	// 根据宽度决定显示多少快捷键
+	var items []struct{ key, desc string }
+	if v.width > 90 {
+		items = []struct{ key, desc string }{
+			{"←/→", "切换标签"},
+			{"l", "日志"},
+			{"s", "终端"},
+			{"r", "刷新"},
+			{"Esc", "返回"},
+			{"q", "退出"},
+		}
+	} else if v.width > 60 {
+		items = []struct{ key, desc string }{
+			{"←/→", "标签"},
+			{"l", "日志"},
+			{"s", "终端"},
+			{"Esc", "返回"},
+			{"q", "退出"},
+		}
+	} else {
+		items = []struct{ key, desc string }{
+			{"←/→", "标签"},
+			{"Esc", "返回"},
+			{"q", "退出"},
+		}
 	}
 	
 	var parts []string
@@ -690,16 +737,8 @@ func (v *ContainerDetailView) renderKeyHints() string {
 		parts = append(parts, keyStyle.Render(item.key)+" "+descStyle.Render(item.desc))
 	}
 	
-	sep := sepStyle.Render("  │  ")
-	line := strings.Join(parts, sep)
-	
-	// 分隔线
-	lineWidth := availableWidth
-	divider := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render(strings.Repeat("─", lineWidth))
-	
-	return "\n  " + divider + "\n  " + line + "\n"
+	line := strings.Join(parts, "  ")
+	return footerStyle.Render(line)
 }
 
 // truncate 截断字符串

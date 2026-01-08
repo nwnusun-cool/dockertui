@@ -9,8 +9,20 @@ import (
 	"time"
 	
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
+	"docktui/internal/compose"
 	"docktui/internal/docker"
+)
+
+// 全局背景样式
+var (
+	// 应用背景色 - 深灰色，提供统一的视觉体验
+	appBackgroundColor = lipgloss.Color("235")
+	
+	// 基础样式 - 用于包装整个应用界面
+	baseStyle = lipgloss.NewStyle().
+		Background(appBackgroundColor)
 )
 
 // ViewType 表示当前显示的视图类型
@@ -27,6 +39,8 @@ const (
 	ViewLogs
 	// ViewHelp 帮助视图
 	ViewHelp
+	// ViewComposeList Compose 项目列表视图
+	ViewComposeList
 )
 
 // View 接口定义了所有视图必须实现的方法
@@ -54,10 +68,12 @@ type Model struct {
 	currentView ViewType
 	
 	// 视图实例
-	containerListView   View // 容器列表视图
-	containerDetailView View // 容器详情视图
-	logsView            View // 日志视图
-	helpView            View // 帮助视图
+	homeView            *HomeView         // 首页导航视图
+	containerListView   View              // 容器列表视图
+	containerDetailView View              // 容器详情视图
+	logsView            View              // 日志视图
+	helpView            View              // 帮助视图
+	composeListView     *ComposeListView  // Compose 项目列表视图
 	
 	// 全局状态字段
 	selectedContainerID string   // 当前选中的容器 ID
@@ -79,18 +95,29 @@ type Model struct {
 
 func NewModel(dockerClient docker.Client) Model {
 	// 初始化各个视图
+	homeView := NewHomeView(dockerClient)
 	containerListView := NewContainerListView(dockerClient)
 	containerDetailView := NewContainerDetailView(dockerClient)
 	logsView := NewLogsView(dockerClient)
 	helpView := NewHelpView(dockerClient)
 	
+	// 初始化 Compose 客户端和视图
+	var composeListView *ComposeListView
+	composeClient, err := compose.NewClient()
+	if err == nil {
+		// 默认扫描当前目录
+		composeListView = NewComposeListView(composeClient, []string{"."})
+	}
+	
 	return Model{
 		dockerClient:        dockerClient,
 		currentView:         ViewWelcome,
+		homeView:            homeView,
 		containerListView:   containerListView,
 		containerDetailView: containerDetailView,
 		logsView:            logsView,
 		helpView:            helpView,
+		composeListView:     composeListView,
 		ready:               false,
 		dockerConnected:     true, // 默认假设已连接
 	}
@@ -256,8 +283,10 @@ func (m Model) createExecShellCmd(containerID, containerName string) tea.ExecCom
 }
 
 func (m Model) Init() tea.Cmd {
-	// 初始化时不需要执行任何命令
-	// 后续可以在这里加载容器列表等异步操作
+	// 初始化首页视图，加载统计数据
+	if m.homeView != nil {
+		return m.homeView.Init()
+	}
 	return nil
 }
 
@@ -299,6 +328,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		
 		// 通知所有视图更新尺寸
+		if m.homeView != nil {
+			m.homeView.SetSize(msg.Width, msg.Height)
+		}
 		if m.containerListView != nil {
 			m.containerListView.SetSize(msg.Width, msg.Height)
 		}
@@ -310,6 +342,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.helpView != nil {
 			m.helpView.SetSize(msg.Width, msg.Height)
+		}
+		if m.composeListView != nil {
+			m.composeListView.SetSize(msg.Width, msg.Height)
 		}
 		return m, nil
 		
@@ -355,27 +390,47 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	
-	// ESC/b 键的特殊处理
-	if msg.String() == "esc" || msg.String() == "b" {
-		// 特殊情况：如果在容器列表的搜索模式，让视图自己处理
+	// ESC 键 - 全局返回上一级（固定命令）
+	if msg.String() == "esc" {
+		// 特殊情况：如果在容器列表的搜索模式，先退出搜索
 		if m.currentView == ViewContainerList {
 			if listView, ok := m.containerListView.(*ContainerListView); ok {
 				if listView.IsSearching() {
-					return m, nil
+					return m, nil // 让视图自己处理退出搜索
 				}
 			}
 		}
 		
-		// 其他情况，执行返回操作
+		// 已经在首页，不处理
 		if m.currentView == ViewWelcome {
-			// 已经在欢迎界面，不处理
 			return m, nil
 		}
 		
-		// 返回上一个视图
-		if m.previousView != ViewWelcome {
+		// 根据当前视图决定返回到哪里（层级导航）
+		// 首页 -> 容器列表 -> 容器详情 -> 日志
+		//      -> Compose列表 -> ...
+		//                  -> 帮助
+		switch m.currentView {
+		case ViewContainerList:
+			// 容器列表返回首页
+			m.currentView = ViewWelcome
+		case ViewContainerDetail:
+			// 容器详情返回容器列表
+			m.currentView = ViewContainerList
+		case ViewLogs:
+			// 日志返回到之前的视图（可能是列表或详情）
+			if m.previousView == ViewContainerDetail || m.previousView == ViewContainerList {
+				m.currentView = m.previousView
+			} else {
+				m.currentView = ViewContainerList
+			}
+		case ViewHelp:
+			// 帮助返回到之前的视图
 			m.currentView = m.previousView
-		} else {
+		case ViewComposeList:
+			// Compose 列表返回首页
+			m.currentView = ViewWelcome
+		default:
 			m.currentView = ViewWelcome
 		}
 		
@@ -398,6 +453,8 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLogsKeys(msg)
 	case ViewHelp:
 		return m.handleHelpKeys(msg)
+	case ViewComposeList:
+		return m.handleComposeListKeys(msg)
 	}
 	
 	return m, nil
@@ -410,26 +467,72 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	
-	// 调试信息：显示按下的键（临时，可删除）
-	// keyStr := msg.String()
-	// m.SetTemporaryMessage(MsgInfo, "按下的键: " + keyStr, 2)
+	// 先让 HomeView 处理按键（方向键、Tab、数字键等）
+	if m.homeView != nil {
+		_, cmd := m.homeView.Update(msg)
+		if cmd != nil {
+			return m, cmd
+		}
+	}
 	
 	switch msg.String() {
-	case "c":
-		// 切换到容器列表视图
-		m.previousView = m.currentView
-		m.currentView = ViewContainerList
-		
-		// 触发容器列表视图的初始化，加载数据
-		var initCmd tea.Cmd
-		if m.containerListView != nil {
-			initCmd = m.containerListView.Init()
+	case "enter":
+		// 根据选中的卡片进入对应视图
+		if m.homeView != nil {
+			selectedCard := m.homeView.GetSelectedCard()
+			if selectedCard == 0 {
+				// 进入容器列表
+				return m.enterContainerList()
+			} else if selectedCard == 1 {
+				// 进入 Compose 视图
+				return m.enterComposeList()
+			}
 		}
+		return m, nil
 		
-		return m, initCmd
+	case "1":
+		// 直接进入容器列表
+		return m.enterContainerList()
+		
+	case "2":
+		// 进入 Compose 视图
+		return m.enterComposeList()
+		
+	case "c":
+		// 兼容旧的快捷键，进入容器列表
+		return m.enterContainerList()
 	}
 	
 	return m, nil
+}
+
+// enterContainerList 进入容器列表视图
+func (m Model) enterContainerList() (tea.Model, tea.Cmd) {
+	m.previousView = m.currentView
+	m.currentView = ViewContainerList
+	
+	// 触发容器列表视图的初始化，加载数据
+	var initCmd tea.Cmd
+	if m.containerListView != nil {
+		initCmd = m.containerListView.Init()
+	}
+	
+	return m, initCmd
+}
+
+// enterComposeList 进入 Compose 项目列表视图
+func (m Model) enterComposeList() (tea.Model, tea.Cmd) {
+	if m.composeListView == nil {
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Docker Compose 未安装或不可用", 3)
+	}
+	
+	m.previousView = m.currentView
+	m.currentView = ViewComposeList
+	
+	// 触发 Compose 列表视图的初始化，扫描项目
+	initCmd := m.composeListView.Init()
+	
+	return m, initCmd
 }
 
 // handleContainerListKeys 处理容器列表视图的快捷键
@@ -613,257 +716,123 @@ func (m Model) handleHelpKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleComposeListKeys 处理 Compose 列表视图的快捷键
+func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Compose 列表视图的按键大部分由视图自己处理
+	// 这里只处理需要切换视图的按键
+	switch msg.String() {
+	case "enter":
+		// 进入项目详情（TODO: 实现详情视图）
+		return m, m.SetTemporaryMessage(MsgInfo, "📋 项目详情功能开发中...", 3)
+	}
+	
+	// 其他按键不处理，返回 nil 让消息传递给视图
+	return m, nil
+}
+
 func (m Model) View() string {
 	var content string
 	
 	// 根据当前视图类型显示不同内容
 	switch m.currentView {
 	case ViewWelcome:
-		content = m.renderWelcome()
+		if m.homeView != nil {
+			content = m.homeView.View()
+		} else {
+			content = "🏠 首页视图未初始化"
+		}
 	case ViewContainerList:
-		// 调用容器列表视图的 View 方法
 		if m.containerListView != nil {
 			content = m.containerListView.View()
 		} else {
-			content = m.renderContainerList()
+			content = "📦 容器列表视图未初始化"
 		}
 	case ViewContainerDetail:
-		// 调用容器详情视图的 View 方法
 		if m.containerDetailView != nil {
 			content = m.containerDetailView.View()
 		} else {
-			content = m.renderContainerDetail()
+			content = "📋 容器详情视图未初始化"
 		}
 	case ViewLogs:
-		// 调用日志视图的 View 方法
 		if m.logsView != nil {
 			content = m.logsView.View()
 		} else {
-			content = m.renderLogs()
+			content = "📜 日志视图未初始化"
 		}
 	case ViewHelp:
-		// 调用帮助视图的 View 方法
 		if m.helpView != nil {
 			content = m.helpView.View()
 		} else {
 			content = "🆘 帮助视图未初始化"
 		}
+	case ViewComposeList:
+		if m.composeListView != nil {
+			content = m.composeListView.View()
+		} else {
+			content = "🧩 Compose 视图未初始化"
+		}
 	default:
 		content = "未知视图"
 	}
 	
-	// 添加分级消息显示（顶部：致命错误；底部：临时提示）
-	// 注意：容器列表视图有自己的消息系统，不需要全局消息
-	if m.currentView == ViewContainerList {
-		// 容器列表视图自己处理消息显示
+	// 容器列表视图和 Compose 列表视图有自己的消息系统，不需要全局消息
+	if m.currentView == ViewContainerList || m.currentView == ViewComposeList {
+		// 这些视图自己处理背景，直接返回内容
 		return content
 	}
 	
-	var statusBar string
-	
-	// 1. 致命错误（顶部常驻）
+	// 添加分级消息显示
 	if m.errorMsg != "" && m.dockerConnected {
-		// Docker 已连接但有致命错误
-		statusBar = "\n\033[1;31m❌ 致命错误: " + m.errorMsg + "\033[0m\n" + content
-		content = statusBar
+		content = "\n\033[1;31m❌ 致命错误: " + m.errorMsg + "\033[0m\n" + content
 	}
-	
-	// 2. 警告消息（5秒自动消失）
 	if m.warningMsg != "" {
 		content += "\n\n\033[1;33m⚠️ 警告: " + m.warningMsg + "\033[0m"
 	}
-	
-	// 3. 信息提示（3秒自动消失）
 	if m.infoMsg != "" {
 		content += "\n\n\033[36m" + m.infoMsg + "\033[0m"
 	}
-	
-	// 4. 成功提示（3秒自动消失）
 	if m.successMsg != "" {
 		content += "\n\n\033[1;32m" + m.successMsg + "\033[0m"
 	}
 	
-	return content
-}
-
-// renderWelcome 渲染欢迎界面（主导航页面）
-func (m Model) renderWelcome() string {
-	var s string
-	
-	s += "\n"
-	s += "  ╔═══════════════════════════════════════════════════════════════════════════╗\n"
-	s += "  ║                                                                           ║\n"
-	s += "  ║                  🐳  DockTUI - Docker 管理工具  🐳                        ║\n"
-	s += "  ║                                                                           ║\n"
-	s += "  ╚═══════════════════════════════════════════════════════════════════════════╝\n"
-	s += "\n"
-	
-	// Docker 连接状态
-	if m.dockerConnected {
-		s += "  ✅ Docker 守护进程已连接\n"
-		s += "\n"
-		
-		// 主功能导航
-		s += "  ╭─────────────────────────────────────────────────────────────────────────╮\n"
-		s += "  │                           📋 主功能菜单                                  │\n"
-		s += "  ╰─────────────────────────────────────────────────────────────────────────╯\n"
-		s += "\n"
-		s += "     \033[1;36m[c]\033[0m  📦 容器管理          - 查看、操作 Docker 容器\n"
-		s += "     \033[90m[i]\033[0m  🖼️  镜像管理          - 查看、管理 Docker 镜像 \033[90m(待实现)\033[0m\n"
-		s += "     \033[90m[n]\033[0m  🌐 网络管理          - 查看、配置 Docker 网络 \033[90m(待实现)\033[0m\n"
-		s += "     \033[90m[v]\033[0m  💾 卷管理            - 查看、管理 Docker 卷   \033[90m(待实现)\033[0m\n"
-		s += "     \033[90m[p]\033[0m  🐙 Compose 项目      - 管理 docker-compose   \033[90m(待实现)\033[0m\n"
-		s += "\n"
-		
-		// 快捷操作
-		s += "  ╭─────────────────────────────────────────────────────────────────────────╮\n"
-		s += "  │                           ⚡ 快捷操作                                    │\n"
-		s += "  ╰─────────────────────────────────────────────────────────────────────────╯\n"
-		s += "\n"
-		s += "     \033[1;36m[?]\033[0m  🆘 帮助面板          - 查看所有快捷键和功能说明\n"
-		s += "     \033[1;36m[q]\033[0m  ❌ 退出程序          - 退出 DockTUI\n"
-		s += "\n"
-		
-		// 提示信息
-		s += "  ╭─────────────────────────────────────────────────────────────────────────╮\n"
-		s += "  │                           💡 使用提示                                    │\n"
-		s += "  ╰─────────────────────────────────────────────────────────────────────────╯\n"
-		s += "\n"
-		s += "     • 使用 \033[1mvim 风格\033[0m 快捷键导航 (j/k 上下移动)\n"
-		s += "     • 按 \033[1mEnter\033[0m 进入选中项，按 \033[1mEsc/b\033[0m 返回上级\n"
-		s += "     • 在容器列表中按 \033[1ms\033[0m 可直接进入容器 Shell\n"
-		s += "     • 按 \033[1m?\033[0m 随时查看完整帮助文档\n"
-		s += "\n"
-		
-	} else {
-		// Docker 连接失败
-		s += "  ❌ 无法连接到 Docker 守护进程\n"
-		s += "\n"
-		s += "  ╭─────────────────────────────────────────────────────────────────────────╮\n"
-		s += "  │                           💡 解决方案                                    │\n"
-		s += "  ╰─────────────────────────────────────────────────────────────────────────╯\n"
-		s += "\n"
-		s += "     1️⃣  确保 Docker Desktop 已启动并运行\n"
-		s += "\n"
-		s += "     2️⃣  远程连接 Docker (设置环境变量):\n"
-		s += "        \033[90mWindows CMD:\033[0m\n"
-		s += "        set DOCKER_HOST=tcp://192.168.3.49:2375\n"
-		s += "\n"
-		s += "        \033[90mWindows PowerShell:\033[0m\n"
-		s += "        $env:DOCKER_HOST=\"tcp://192.168.3.49:2375\"\n"
-		s += "\n"
-		s += "        \033[90mLinux/macOS:\033[0m\n"
-		s += "        export DOCKER_HOST=tcp://192.168.3.49:2375\n"
-		s += "\n"
-		s += "     3️⃣  检查 Docker 服务状态:\n"
-		s += "        docker ps\n"
-		s += "\n"
-		
-		if m.errorMsg != "" {
-			s += "  ╭─────────────────────────────────────────────────────────────────────────╮\n"
-			s += "  │                           📝 错误详情                                    │\n"
-			s += "  ╰─────────────────────────────────────────────────────────────────────────╯\n"
-			s += "\n"
-			s += "     " + m.errorMsg + "\n"
-			s += "\n"
-		}
-		
-		s += "  ⚠️  请解决 Docker 连接问题后重新启动程序\n"
-		s += "\n"
-		s += "     按 \033[1mq\033[0m 退出程序\n"
-		s += "\n"
-	}
-	
-	return s
-}
-
-// renderContainerList 渲染容器列表视图
-func (m Model) renderContainerList() string {
-	var s string
-	
-	s += "\n"
-	s += "  ╔═══════════════════════════════════════════════════════════╗\n"
-	s += "  ║                    📦 容器列表                      ║\n"
-	s += "  ╚═══════════════════════════════════════════════════════════╝\n"
-	s += "\n"
-	s += "  🚧 此视图尚未实现，请等待 U3/L1 任务完成。\n"
-	s += "\n"
-	s += "  ⌨️  快捷键：\n"
-	s += "     q / Ctrl+C  - 退出程序\n"
-	s += "     Esc / b     - 返回欢迎界面\n"
-	s += "     r           - 刷新列表（待实现）\n"
-	s += "     Enter       - 查看详情（待实现）\n"
-	s += "     l           - 查看日志（待实现）\n"
-	s += "\n"
-	
-	return s
-}
-
-// renderContainerDetail 渲染容器详情视图
-func (m Model) renderContainerDetail() string {
-	var s string
-	
-	s += "\n"
-	s += "  ╔═══════════════════════════════════════════════════════════╗\n"
-	s += "  ║                    📋 容器详情                      ║\n"
-	s += "  ╚═══════════════════════════════════════════════════════════╝\n"
-	s += "\n"
-	s += "  🚧 此视图尚未实现，请等待 V1/V2 任务完成。\n"
-	s += "\n"
-	s += "  ⌨️  快捷键：\n"
-	s += "     q / Ctrl+C  - 退出程序\n"
-	s += "     Esc / b     - 返回列表\n"
-	s += "     l           - 查看日志（待实现）\n"
-	s += "\n"
-	
-	return s
-}
-
-// renderLogs 渲染日志视图
-func (m Model) renderLogs() string {
-	var s string
-	
-	s += "\n"
-	s += "  ╔═══════════════════════════════════════════════════════════╗\n"
-	s += "  ║                    📜 容器日志                      ║\n"
-	s += "  ╚═══════════════════════════════════════════════════════════╝\n"
-	s += "\n"
-	s += "  🚧 此视图尚未实现，请等待 G1/G2 任务完成。\n"
-	s += "\n"
-	s += "  ⌨️  快捷键：\n"
-	s += "     q / Ctrl+C  - 退出程序\n"
-	s += "     Esc / b     - 返回上一个视图\n"
-	s += "     f           - 切换 Follow 模式（待实现）\n"
-	s += "\n"
-	
-	return s
+	// 应用全局背景（不设置固定高度，让内容自然填充）
+	return baseStyle.Width(m.width).Render(content)
 }
 
 // delegateToCurrentView 将消息委托给当前活动的视图处理
 func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	
-	// 根据当前视图类型，将消息传递给对应的视图实例
 	switch m.currentView {
+	case ViewWelcome:
+		if m.homeView != nil {
+			_, cmd = m.homeView.Update(msg)
+		}
 	case ViewContainerList:
 		if m.containerListView != nil {
 			var updatedView View
 			updatedView, cmd = m.containerListView.Update(msg)
 			m.containerListView = updatedView
 		}
-		
 	case ViewContainerDetail:
 		if m.containerDetailView != nil {
 			var updatedView View
 			updatedView, cmd = m.containerDetailView.Update(msg)
 			m.containerDetailView = updatedView
 		}
-		
 	case ViewLogs:
 		if m.logsView != nil {
 			var updatedView View
 			updatedView, cmd = m.logsView.Update(msg)
 			m.logsView = updatedView
+		}
+	case ViewComposeList:
+		if m.composeListView != nil {
+			var updatedView View
+			updatedView, cmd = m.composeListView.Update(msg)
+			if v, ok := updatedView.(*ComposeListView); ok {
+				m.composeListView = v
+			}
 		}
 	}
 	

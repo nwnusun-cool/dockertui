@@ -102,14 +102,14 @@ type ContainerListView struct {
 	// 数据状态（L1.1）
 	containers    []docker.Container // 容器列表数据（原始）
 	filteredContainers []docker.Container // 过滤后的容器列表
-	tableModel    table.Model        // bubbles/table 组件
+	tableModel    table.Model        // bubbles/table 组件（保留兼容）
+	scrollTable   *ScrollableTable   // 可水平滚动的表格
 	loading       bool               // 是否正在加载
 	errorMsg      string             // 错误信息
 	successMsg    string             // 成功消息
 	successMsgTime time.Time         // 成功消息显示时间
 	
-	// 过滤状态（L4）
-	filterMode    string // 过滤模式: "all", "running", "exited"
+	// 搜索状态（L4）
 	searchQuery   string // 搜索关键字
 	isSearching   bool   // 是否处于搜索模式
 	
@@ -131,15 +131,15 @@ type ContainerListView struct {
 
 // NewContainerListView 创建容器列表视图
 func NewContainerListView(dockerClient docker.Client) *ContainerListView {
-	// 定义表格列（和 docker ps 一样）
+	// 定义表格列（NAME 移到第二列）
 	columns := []table.Column{
 		{Title: "CONTAINER ID", Width: 14},
+		{Title: "NAMES", Width: 18},
 		{Title: "IMAGE", Width: 25},
 		{Title: "COMMAND", Width: 22},
 		{Title: "CREATED", Width: 14},
 		{Title: "STATUS", Width: 22},
 		{Title: "PORTS", Width: 40},
-		{Title: "NAMES", Width: 18},
 	}
 	
 	// 创建表格样式
@@ -162,11 +162,23 @@ func NewContainerListView(dockerClient docker.Client) *ContainerListView {
 	)
 	t.SetStyles(s)
 	
+	// 创建可滚动表格（NAME 移到第二列）
+	scrollColumns := []TableColumn{
+		{Title: "CONTAINER ID", Width: 14},
+		{Title: "NAMES", Width: 20},
+		{Title: "IMAGE", Width: 30},
+		{Title: "COMMAND", Width: 25},
+		{Title: "CREATED", Width: 16},
+		{Title: "STATUS", Width: 25},
+		{Title: "PORTS", Width: 50},
+	}
+	scrollTable := NewScrollableTable(scrollColumns)
+	
 	return &ContainerListView{
 		dockerClient: dockerClient,
 		tableModel:   t,
+		scrollTable:  scrollTable,
 		keys:         DefaultKeyMap(),
-		filterMode:   "all",
 		searchQuery:  "",
 		isSearching:  false,
 	}
@@ -369,18 +381,45 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			v.isSearching = true
 			v.searchQuery = ""
 			return v, nil
-		case msg.String() == "a":
-			// 切换过滤模式：all -> running -> exited -> all（L4.1）
-			switch v.filterMode {
-			case "all":
-				v.filterMode = "running"
-			case "running":
-				v.filterMode = "exited"
-			case "exited":
-				v.filterMode = "all"
+		case msg.String() == "left", msg.String() == "h":
+			// 水平向左滚动
+			if v.scrollTable != nil {
+				v.scrollTable.ScrollLeft()
 			}
-			v.applyFilters()
-			v.updateColumnWidths()
+			return v, nil
+		case msg.String() == "right", msg.String() == "l":
+			// 水平向右滚动
+			if v.scrollTable != nil {
+				v.scrollTable.ScrollRight()
+			}
+			return v, nil
+		case msg.String() == "j", msg.String() == "down":
+			// 向下移动
+			if v.scrollTable != nil {
+				v.scrollTable.MoveDown(1)
+			}
+			v.tableModel.MoveDown(1)
+			return v, nil
+		case msg.String() == "k", msg.String() == "up":
+			// 向上移动
+			if v.scrollTable != nil {
+				v.scrollTable.MoveUp(1)
+			}
+			v.tableModel.MoveUp(1)
+			return v, nil
+		case msg.String() == "g":
+			// 跳转到顶部
+			if v.scrollTable != nil {
+				v.scrollTable.GotoTop()
+			}
+			v.tableModel.GotoTop()
+			return v, nil
+		case msg.String() == "G":
+			// 跳转到底部
+			if v.scrollTable != nil {
+				v.scrollTable.GotoBottom()
+			}
+			v.tableModel.GotoBottom()
 			return v, nil
 		case msg.String() == "t":
 			// 启动容器（Start）
@@ -401,7 +440,7 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			// 批量操作菜单 - Ctrl+A
 			return v, v.showBatchOperationsMenu()
 		default:
-			// 其他按键交给 table 处理（j/k/up/down 导航）
+			// 其他按键交给 table 处理
 			v.tableModel, _ = v.tableModel.Update(msg)
 			return v, nil
 		}
@@ -458,12 +497,9 @@ func (v *ContainerListView) View() string {
 		separatorStyle.Render("  │  ") +
 		stoppedStyle.Render(fmt.Sprintf("■ Stopped: %d", stoppedCount))
 	
-	// 过滤/搜索附加信息
-	if v.filterMode != "all" || showingCount != totalCount || (!v.isSearching && v.searchQuery != "") {
+	// 搜索附加信息
+	if showingCount != totalCount || (!v.isSearching && v.searchQuery != "") {
 		filterParts := []string{}
-		if v.filterMode != "all" {
-			filterParts = append(filterParts, fmt.Sprintf("Filter: %s", v.filterMode))
-		}
 		if showingCount != totalCount {
 			filterParts = append(filterParts, fmt.Sprintf("Showing: %d", showingCount))
 		}
@@ -544,15 +580,11 @@ func (v *ContainerListView) View() string {
 	if len(v.filteredContainers) == 0 {
 		var filterHints []string
 		filterHints = append(filterHints, "", searchHintStyle.Render("🔍 没有匹配的容器"), "")
-		filterHints = append(filterHints, statusBarLabelStyle.Render("当前过滤条件:"))
-		if v.filterMode != "all" {
-			filterHints = append(filterHints, searchHintStyle.Render("   • 状态过滤: ")+statusBarKeyStyle.Render(v.filterMode))
-		}
+		filterHints = append(filterHints, statusBarLabelStyle.Render("当前搜索条件:"))
 		if v.searchQuery != "" {
 			filterHints = append(filterHints, searchHintStyle.Render("   • 搜索关键字: ")+statusBarKeyStyle.Render("\""+v.searchQuery+"\""))
 		}
 		filterHints = append(filterHints, "", statusBarLabelStyle.Render("💡 操作提示:"))
-		filterHints = append(filterHints, searchHintStyle.Render("   • 按 ")+statusBarKeyStyle.Render("a")+searchHintStyle.Render(" 切换状态过滤"))
 		if v.searchQuery != "" {
 			filterHints = append(filterHints, searchHintStyle.Render("   • 按 ")+statusBarKeyStyle.Render("ESC")+searchHintStyle.Render(" 清除搜索"))
 		} else {
@@ -565,12 +597,17 @@ func (v *ContainerListView) View() string {
 		return s
 	}
 	
-	// 使用 bubbles/table 组件渲染表格
-	s += "  " + v.tableModel.View() + "\n"
+	// 使用可滚动表格渲染
+	if v.scrollTable != nil {
+		s += v.scrollTable.View() + "\n"
+	} else {
+		// 回退到 bubbles/table 组件
+		s += "  " + v.tableModel.View() + "\n"
+	}
 	
 	// 添加空行填充，确保清除之前可能残留的加载提示
 	// 这是为了解决终端渲染时旧内容残留的问题
-	s += "\n\n"
+	s += "\n"
 	
 	// 底部搜索输入栏（如果处于搜索模式）
 	if v.isSearching {
@@ -729,10 +766,21 @@ func (v *ContainerListView) renderConfirmDialogContent() string {
 
 // renderStatusBar 渲染顶部状态栏（使用 lipgloss，自适应宽度）
 func (v *ContainerListView) renderStatusBar() string {
-	availableWidth := v.width - 4
+	// 确保有最小宽度
+	width := v.width
+	if width < 80 {
+		width = 80
+	}
+	
+	availableWidth := width - 4
 	if availableWidth < 60 {
 		availableWidth = 60
 	}
+	
+	// 状态栏背景样式
+	statusBarBgStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("235")).
+		Width(width)
 	
 	// 计算列宽：左侧标签列 + 右侧快捷键区域
 	labelColWidth := 20
@@ -753,24 +801,32 @@ func (v *ContainerListView) renderStatusBar() string {
 		itemWidth = 12
 	}
 	
-	// 定义样式
+	// 定义样式（带背景色）
 	labelStyle := lipgloss.NewStyle().
 		Width(labelColWidth).
 		Foreground(lipgloss.Color("220")).
+		Background(lipgloss.Color("235")).
 		Bold(true)
 	
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
+		Foreground(lipgloss.Color("81")).
+		Background(lipgloss.Color("235"))
+	
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252")).
+		Background(lipgloss.Color("235"))
 	
 	itemStyle := lipgloss.NewStyle().
-		Width(itemWidth)
+		Width(itemWidth).
+		Background(lipgloss.Color("235"))
 	
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+		Foreground(lipgloss.Color("245")).
+		Background(lipgloss.Color("235"))
 	
 	// 构建快捷键项
 	makeItem := func(key, desc string) string {
-		return itemStyle.Render(keyStyle.Render(key) + " " + desc)
+		return itemStyle.Render(keyStyle.Render(key) + descStyle.Render(" "+desc))
 	}
 	
 	var lines []string
@@ -778,22 +834,22 @@ func (v *ContainerListView) renderStatusBar() string {
 	// 第一行：Docker 状态 + 基本操作
 	row1Label := labelStyle.Render("Docker: Connected")
 	row1Keys := makeItem("<a>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
-	lines = append(lines, "  "+row1Label+row1Keys)
+	lines = append(lines, statusBarBgStyle.Render("  "+row1Label+row1Keys))
 	
 	// 第二行：容器操作
 	row2Label := labelStyle.Render("Ops:")
 	row2Keys := makeItem("<t>", "Start") + makeItem("<p>", "Stop") + makeItem("<P>", "Pause") + makeItem("<R>", "Restart")
-	lines = append(lines, "  "+row2Label+row2Keys)
+	lines = append(lines, statusBarBgStyle.Render("  "+row2Label+row2Keys))
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
 	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<Ctrl+A>", "Batch") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
-	lines = append(lines, "  "+row3Label+row3Keys)
+	lines = append(lines, statusBarBgStyle.Render("  "+row3Label+row3Keys))
 	
 	// 第四行：查看操作
 	row4Label := labelStyle.Render("View:")
 	row4Keys := makeItem("<Enter>", "Details") + makeItem("<b>", "Back") + makeItem("<q>", "Quit")
-	lines = append(lines, "  "+row4Label+row4Keys)
+	lines = append(lines, statusBarBgStyle.Render("  "+row4Label+row4Keys))
 	
 	// 第五行：版本 + 刷新时间 + vim 提示
 	versionInfo := "v0.1.0"
@@ -804,8 +860,8 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	row5Label := labelStyle.Render("Version: " + versionInfo)
 	row5Info := hintStyle.Render("Last Refresh: "+refreshInfo) + "    " + 
-		hintStyle.Render("(vim): j/k=Nav  Enter=Select  Esc=Back  q=Quit")
-	lines = append(lines, "  "+row5Label+row5Info)
+		hintStyle.Render("(vim): j/k=上下  h/l=左右滚动  Enter=选择  Esc=返回  q=退出")
+	lines = append(lines, statusBarBgStyle.Render("  "+row5Label+row5Info))
 	
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
@@ -854,12 +910,12 @@ func (v *ContainerListView) containersToRows(containers []docker.Container) []ta
 		
 		rows[i] = table.Row{
 			c.ShortID,     // CONTAINER ID
+			c.Name,        // NAMES (移到第二列)
 			c.Image,       // IMAGE
 			c.Command,     // COMMAND
 			created,       // CREATED
 			styledStatus,  // STATUS (带颜色)
 			ports,         // PORTS
-			c.Name,        // NAMES
 		}
 	}
 	
@@ -927,11 +983,16 @@ func (v *ContainerListView) SetSize(width, height int) {
 	v.height = height
 	
 	// 调整表格高度
-	tableHeight := height - 12
+	tableHeight := height - 15 // 减去状态栏、统计栏、滚动指示器等
 	if tableHeight < 5 {
 		tableHeight = 5
 	}
 	v.tableModel.SetHeight(tableHeight)
+	
+	// 更新可滚动表格尺寸
+	if v.scrollTable != nil {
+		v.scrollTable.SetSize(width-4, tableHeight)
+	}
 	
 	// 根据实际数据内容计算最优列宽
 	v.updateColumnWidths()
@@ -990,12 +1051,12 @@ func (v *ContainerListView) updateColumnWidths() {
 	if totalNeeded <= availableWidth {
 		v.tableModel.SetColumns([]table.Column{
 			{Title: "CONTAINER ID", Width: idWidth},
+			{Title: "NAMES", Width: maxNames + 2},
 			{Title: "IMAGE", Width: maxImage + 2},
 			{Title: "COMMAND", Width: maxCommand + 2},
 			{Title: "CREATED", Width: maxCreated + 2},
 			{Title: "STATUS", Width: maxStatus + 2 + statusAnsiPadding},
 			{Title: "PORTS", Width: maxPorts + 2},
-			{Title: "NAMES", Width: maxNames + 2},
 		})
 	} else {
 		// 宽度不够，按比例分配
@@ -1036,13 +1097,48 @@ func (v *ContainerListView) updateColumnWidths() {
 		
 		v.tableModel.SetColumns([]table.Column{
 			{Title: "CONTAINER ID", Width: idWidth},
+			{Title: "NAMES", Width: namesWidth},
 			{Title: "IMAGE", Width: imageWidth},
 			{Title: "COMMAND", Width: commandWidth},
 			{Title: "CREATED", Width: createdWidth},
 			{Title: "STATUS", Width: statusWidth},
 			{Title: "PORTS", Width: portsWidth},
-			{Title: "NAMES", Width: namesWidth},
 		})
+	}
+	
+	// 更新可滚动表格的列宽和数据（NAME 在第二列）
+	if v.scrollTable != nil {
+		v.scrollTable.SetColumns([]TableColumn{
+			{Title: "CONTAINER ID", Width: maxID + 2},
+			{Title: "NAMES", Width: maxNames + 2},
+			{Title: "IMAGE", Width: maxImage + 2},
+			{Title: "COMMAND", Width: maxCommand + 2},
+			{Title: "CREATED", Width: maxCreated + 2},
+			{Title: "STATUS", Width: maxStatus + 2},
+			{Title: "PORTS", Width: maxPorts + 2},
+		})
+		
+		// 转换数据为 TableRow（NAME 在第二列）
+		if len(v.filteredContainers) > 0 {
+			rows := make([]TableRow, len(v.filteredContainers))
+			for i, c := range v.filteredContainers {
+				created := formatCreatedTime(c.Created)
+				ports := c.Ports
+				if ports == "" {
+					ports = "-"
+				}
+				rows[i] = TableRow{
+					c.ShortID,
+					c.Name,
+					c.Image,
+					c.Command,
+					created,
+					c.Status,
+					ports,
+				}
+			}
+			v.scrollTable.SetRows(rows)
+		}
 	}
 	
 	// 重新渲染表格数据
@@ -1057,8 +1153,13 @@ func (v *ContainerListView) GetSelectedContainer() *docker.Container {
 	if len(v.filteredContainers) == 0 {
 		return nil
 	}
-	// 从 table 组件获取当前选中的索引
-	selectedIndex := v.tableModel.Cursor()
+	// 优先从可滚动表格获取选中索引
+	var selectedIndex int
+	if v.scrollTable != nil {
+		selectedIndex = v.scrollTable.Cursor()
+	} else {
+		selectedIndex = v.tableModel.Cursor()
+	}
 	if selectedIndex < 0 || selectedIndex >= len(v.filteredContainers) {
 		return nil
 	}
@@ -1070,20 +1171,12 @@ func (v *ContainerListView) IsSearching() bool {
 	return v.isSearching
 }
 
-// applyFilters 应用过滤和搜索（L4）
+// applyFilters 应用搜索过滤（L4）
 func (v *ContainerListView) applyFilters() {
 	v.filteredContainers = make([]docker.Container, 0)
 	
 	for _, container := range v.containers {
-		// 1. 应用状态过滤
-		if v.filterMode == "running" && container.State != "running" {
-			continue
-		}
-		if v.filterMode == "exited" && container.State != "exited" {
-			continue
-		}
-		
-		// 2. 应用搜索过滤
+		// 应用搜索过滤
 		if v.searchQuery != "" {
 			// 搜索容器名称、镜像名称、ID
 			query := strings.ToLower(v.searchQuery)
