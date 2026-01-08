@@ -764,7 +764,7 @@ func (v *ContainerListView) renderConfirmDialogContent() string {
 	return dialog
 }
 
-// renderStatusBar 渲染顶部状态栏（使用 lipgloss，自适应宽度）
+// renderStatusBar 渲染顶部状态栏（简化版，背景由全局处理）
 func (v *ContainerListView) renderStatusBar() string {
 	// 确保有最小宽度
 	width := v.width
@@ -776,11 +776,6 @@ func (v *ContainerListView) renderStatusBar() string {
 	if availableWidth < 60 {
 		availableWidth = 60
 	}
-	
-	// 状态栏背景样式
-	statusBarBgStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("235")).
-		Width(width)
 	
 	// 计算列宽：左侧标签列 + 右侧快捷键区域
 	labelColWidth := 20
@@ -801,28 +796,23 @@ func (v *ContainerListView) renderStatusBar() string {
 		itemWidth = 12
 	}
 	
-	// 定义样式（带背景色）
+	// 定义样式（不再单独设置背景，由全局统一处理）
 	labelStyle := lipgloss.NewStyle().
 		Width(labelColWidth).
 		Foreground(lipgloss.Color("220")).
-		Background(lipgloss.Color("235")).
 		Bold(true)
 	
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Background(lipgloss.Color("235"))
+		Foreground(lipgloss.Color("81"))
 	
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
-		Background(lipgloss.Color("235"))
+		Foreground(lipgloss.Color("252"))
 	
 	itemStyle := lipgloss.NewStyle().
-		Width(itemWidth).
-		Background(lipgloss.Color("235"))
+		Width(itemWidth)
 	
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Background(lipgloss.Color("235"))
+		Foreground(lipgloss.Color("245"))
 	
 	// 构建快捷键项
 	makeItem := func(key, desc string) string {
@@ -834,22 +824,22 @@ func (v *ContainerListView) renderStatusBar() string {
 	// 第一行：Docker 状态 + 基本操作
 	row1Label := labelStyle.Render("Docker: Connected")
 	row1Keys := makeItem("<a>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
-	lines = append(lines, statusBarBgStyle.Render("  "+row1Label+row1Keys))
+	lines = append(lines, "  "+row1Label+row1Keys)
 	
 	// 第二行：容器操作
 	row2Label := labelStyle.Render("Ops:")
 	row2Keys := makeItem("<t>", "Start") + makeItem("<p>", "Stop") + makeItem("<P>", "Pause") + makeItem("<R>", "Restart")
-	lines = append(lines, statusBarBgStyle.Render("  "+row2Label+row2Keys))
+	lines = append(lines, "  "+row2Label+row2Keys)
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
 	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<Ctrl+A>", "Batch") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
-	lines = append(lines, statusBarBgStyle.Render("  "+row3Label+row3Keys))
+	lines = append(lines, "  "+row3Label+row3Keys)
 	
 	// 第四行：查看操作
 	row4Label := labelStyle.Render("View:")
 	row4Keys := makeItem("<Enter>", "Details") + makeItem("<b>", "Back") + makeItem("<q>", "Quit")
-	lines = append(lines, statusBarBgStyle.Render("  "+row4Label+row4Keys))
+	lines = append(lines, "  "+row4Label+row4Keys)
 	
 	// 第五行：版本 + 刷新时间 + vim 提示
 	versionInfo := "v0.1.0"
@@ -861,7 +851,7 @@ func (v *ContainerListView) renderStatusBar() string {
 	row5Label := labelStyle.Render("Version: " + versionInfo)
 	row5Info := hintStyle.Render("Last Refresh: "+refreshInfo) + "    " + 
 		hintStyle.Render("(vim): j/k=上下  h/l=左右滚动  Enter=选择  Esc=返回  q=退出")
-	lines = append(lines, statusBarBgStyle.Render("  "+row5Label+row5Info))
+	lines = append(lines, "  "+row5Label+row5Info)
 	
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }

@@ -45,24 +45,23 @@ type TableStyles struct {
 	ScrollIndicator lipgloss.Style
 }
 
-// DefaultTableStyles 默认表格样式
+// DefaultTableStyles 默认表格样式（使用全局主题颜色）
 func DefaultTableStyles() TableStyles {
 	return TableStyles{
 		Header: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("236")).
-			Padding(0, 1),
+			Foreground(ThemeTextColor).
+			Background(ThemeBgSecondary),
 		Cell: lipgloss.NewStyle().
-			Padding(0, 1),
+			Foreground(ThemeTextColor).
+			Background(ThemeBgColor),
 		Selected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("229")).
-			Background(lipgloss.Color("57")).
-			Padding(0, 1),
+			Background(lipgloss.Color("57")),
 		Border: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")),
+			Foreground(ThemeBorderColor),
 		ScrollIndicator: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("81")).
+			Foreground(ThemeHighlight).
 			Bold(true),
 	}
 }
@@ -292,14 +291,16 @@ func (t *ScrollableTable) renderScrollIndicator(canLeft, canRight bool) string {
 	return "  " + leftArrow + hint + position + rightArrow
 }
 
-// renderHeader 渲染表头
+// renderHeader 渲染表头（整行统一背景）
 func (t *ScrollableTable) renderHeader() string {
-	var cells []string
+	var headerContent strings.Builder
 	for _, col := range t.columns {
 		cell := t.padOrTruncate(col.Title, col.Width)
-		cells = append(cells, t.styles.Header.Render(cell))
+		headerContent.WriteString(" ")
+		headerContent.WriteString(cell)
+		headerContent.WriteString(" ")
 	}
-	return strings.Join(cells, "")
+	return t.styles.Header.Render(headerContent.String())
 }
 
 // renderSeparator 渲染分隔线
@@ -311,7 +312,7 @@ func (t *ScrollableTable) renderSeparator() string {
 	return t.styles.Border.Render(strings.Join(parts, ""))
 }
 
-// renderRow 渲染数据行
+// renderRow 渲染数据行（整行统一背景）
 func (t *ScrollableTable) renderRow(index int) string {
 	if index < 0 || index >= len(t.rows) {
 		return ""
@@ -320,21 +321,25 @@ func (t *ScrollableTable) renderRow(index int) string {
 	row := t.rows[index]
 	isSelected := index == t.cursor && t.focused
 	
-	var cells []string
+	// 先构建整行内容（不带样式）
+	var rowContent strings.Builder
 	for i, col := range t.columns {
 		cellValue := ""
 		if i < len(row) {
 			cellValue = row[i]
 		}
 		cell := t.padOrTruncate(cellValue, col.Width)
-		
-		if isSelected {
-			cells = append(cells, t.styles.Selected.Render(cell))
-		} else {
-			cells = append(cells, t.styles.Cell.Render(cell))
-		}
+		// 添加单元格内容和 padding
+		rowContent.WriteString(" ")
+		rowContent.WriteString(cell)
+		rowContent.WriteString(" ")
 	}
-	return strings.Join(cells, "")
+	
+	// 整行应用统一样式
+	if isSelected {
+		return t.styles.Selected.Render(rowContent.String())
+	}
+	return t.styles.Cell.Render(rowContent.String())
 }
 
 // padOrTruncate 填充或截断字符串到指定宽度
@@ -411,12 +416,8 @@ func (t *ScrollableTable) truncateWithAnsi(s string, maxLen int) string {
 	return result.String()
 }
 
-// applyHorizontalScroll 应用水平滚动
+// applyHorizontalScroll 应用水平滚动（保持行宽度一致）
 func (t *ScrollableTable) applyHorizontalScroll(line string, visibleWidth int) string {
-	if t.horizontalOffset == 0 && t.visibleLength(line) <= visibleWidth {
-		return "  " + line
-	}
-	
 	// 将行转换为可见字符数组（保留 ANSI 转义码）
 	type charWithStyle struct {
 		char  rune
@@ -447,6 +448,9 @@ func (t *ScrollableTable) applyHorizontalScroll(line string, visibleWidth int) s
 		currentStyle.Reset()
 	}
 	
+	// 如果没有水平滚动且内容足够短，直接返回（但要填充到 visibleWidth）
+	lineVisibleLen := len(chars)
+	
 	// 应用水平偏移
 	startIdx := t.horizontalOffset
 	if startIdx > len(chars) {
@@ -462,6 +466,7 @@ func (t *ScrollableTable) applyHorizontalScroll(line string, visibleWidth int) s
 	result.WriteString("  ") // 左边距
 	
 	lastStyle := ""
+	actualWidth := 0
 	for i := startIdx; i < endIdx; i++ {
 		c := chars[i]
 		if c.style != "" && c.style != lastStyle {
@@ -469,10 +474,20 @@ func (t *ScrollableTable) applyHorizontalScroll(line string, visibleWidth int) s
 			lastStyle = c.style
 		}
 		result.WriteRune(c.char)
+		actualWidth++
 	}
 	
-	// 重置样式
+	// 如果行内容不足 visibleWidth，用空格填充（保持最后的样式/背景）
+	if actualWidth < visibleWidth {
+		// 不重置样式，直接添加空格，这样空格会继承当前的背景色
+		padding := visibleWidth - actualWidth
+		result.WriteString(strings.Repeat(" ", padding))
+	}
+	
+	// 最后重置样式
 	result.WriteString("\x1b[0m")
+	
+	_ = lineVisibleLen // 避免未使用警告
 	
 	return result.String()
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 	
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,14 +16,26 @@ import (
 	"docktui/internal/docker"
 )
 
-// 全局背景样式
+// 全局主题颜色定义 - 集中管理所有颜色
 var (
-	// 应用背景色 - 深灰色，提供统一的视觉体验
-	appBackgroundColor = lipgloss.Color("235")
-	
-	// 基础样式 - 用于包装整个应用界面
-	baseStyle = lipgloss.NewStyle().
-		Background(appBackgroundColor)
+	// 主背景色 - 深灰色
+	ThemeBgColor = lipgloss.Color("235")
+	// 次要背景色 - 稍浅的灰色（用于卡片、面板等）
+	ThemeBgSecondary = lipgloss.Color("236")
+	// 边框颜色
+	ThemeBorderColor = lipgloss.Color("240")
+	// 主文字颜色
+	ThemeTextColor = lipgloss.Color("252")
+	// 次要文字颜色
+	ThemeTextMuted = lipgloss.Color("245")
+	// 高亮颜色
+	ThemeHighlight = lipgloss.Color("81")
+	// 成功颜色
+	ThemeSuccess = lipgloss.Color("82")
+	// 警告颜色
+	ThemeWarning = lipgloss.Color("220")
+	// 错误颜色
+	ThemeError = lipgloss.Color("196")
 )
 
 // ViewType 表示当前显示的视图类型
@@ -730,6 +743,71 @@ func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// fillBackground 填充整个屏幕的背景色
+// 这是统一处理背景的核心函数
+func (m Model) fillBackground(content string) string {
+	if m.width <= 0 || m.height <= 0 {
+		return content
+	}
+	
+	// 将内容按行分割
+	lines := strings.Split(content, "\n")
+	
+	// 背景色 ANSI 转义码 (256色模式，颜色235)
+	bgStart := "\x1b[48;5;235m"
+	bgReset := "\x1b[0m"
+	
+	// 处理每一行，确保宽度一致并填充背景
+	var result strings.Builder
+	for i := 0; i < m.height; i++ {
+		var line string
+		if i < len(lines) {
+			line = lines[i]
+		}
+		
+		// 计算可见字符长度（排除 ANSI 转义码）
+		visibleLen := visibleLength(line)
+		
+		// 如果行太短，用空格填充到屏幕宽度
+		padding := ""
+		if visibleLen < m.width {
+			padding = strings.Repeat(" ", m.width-visibleLen)
+		}
+		
+		// 整行包裹背景色：背景开始 + 内容 + 填充 + 重置
+		result.WriteString(bgStart)
+		result.WriteString(line)
+		result.WriteString(padding)
+		result.WriteString(bgReset)
+		
+		if i < m.height-1 {
+			result.WriteString("\n")
+		}
+	}
+	
+	return result.String()
+}
+
+// visibleLength 计算可见字符长度（排除 ANSI 转义码）
+func visibleLength(s string) int {
+	inEscape := false
+	length := 0
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if r == 'm' {
+				inEscape = false
+			}
+			continue
+		}
+		length++
+	}
+	return length
+}
+
 func (m Model) View() string {
 	var content string
 	
@@ -775,28 +853,28 @@ func (m Model) View() string {
 		content = "未知视图"
 	}
 	
-	// 容器列表视图和 Compose 列表视图有自己的消息系统，不需要全局消息
-	if m.currentView == ViewContainerList || m.currentView == ViewComposeList {
-		// 这些视图自己处理背景，直接返回内容
-		return content
+	// 添加分级消息显示（非容器列表和 Compose 列表视图）
+	if m.currentView != ViewContainerList && m.currentView != ViewComposeList {
+		if m.errorMsg != "" && m.dockerConnected {
+			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true).Background(ThemeBgColor)
+			content = "\n" + errorStyle.Render("❌ 致命错误: "+m.errorMsg) + "\n" + content
+		}
+		if m.warningMsg != "" {
+			warnStyle := lipgloss.NewStyle().Foreground(ThemeWarning).Bold(true).Background(ThemeBgColor)
+			content += "\n\n" + warnStyle.Render("⚠️ 警告: "+m.warningMsg)
+		}
+		if m.infoMsg != "" {
+			infoStyle := lipgloss.NewStyle().Foreground(ThemeHighlight).Background(ThemeBgColor)
+			content += "\n\n" + infoStyle.Render(m.infoMsg)
+		}
+		if m.successMsg != "" {
+			successStyle := lipgloss.NewStyle().Foreground(ThemeSuccess).Bold(true).Background(ThemeBgColor)
+			content += "\n\n" + successStyle.Render(m.successMsg)
+		}
 	}
 	
-	// 添加分级消息显示
-	if m.errorMsg != "" && m.dockerConnected {
-		content = "\n\033[1;31m❌ 致命错误: " + m.errorMsg + "\033[0m\n" + content
-	}
-	if m.warningMsg != "" {
-		content += "\n\n\033[1;33m⚠️ 警告: " + m.warningMsg + "\033[0m"
-	}
-	if m.infoMsg != "" {
-		content += "\n\n\033[36m" + m.infoMsg + "\033[0m"
-	}
-	if m.successMsg != "" {
-		content += "\n\n\033[1;32m" + m.successMsg + "\033[0m"
-	}
-	
-	// 应用全局背景（不设置固定高度，让内容自然填充）
-	return baseStyle.Width(m.width).Render(content)
+	// 统一填充背景
+	return m.fillBackground(content)
 }
 
 // delegateToCurrentView 将消息委托给当前活动的视图处理

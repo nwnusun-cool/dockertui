@@ -41,11 +41,10 @@ type ComposeListView struct {
 	autoRefresh     bool
 }
 
-// Compose 列表样式定义
+// Compose 列表样式定义 - 不设置背景，由全局 fillBackground 处理
 var (
 	composeHeaderStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("252")).
-		Background(lipgloss.Color("236")).
 		Padding(0, 1).
 		Bold(true)
 
@@ -66,7 +65,6 @@ var (
 
 	composeFooterStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245")).
-		Background(lipgloss.Color("236")).
 		Padding(0, 1)
 
 	composeFooterKeyStyle = lipgloss.NewStyle().

@@ -37,7 +37,7 @@ type HomeView struct {
 	lastRefreshTime   time.Time
 }
 
-// 首页样式定义
+// 首页样式定义 - 使用全局主题颜色
 var (
 	// Logo 样式
 	logoStyle = lipgloss.NewStyle().
@@ -48,10 +48,9 @@ var (
 		Foreground(lipgloss.Color("220")).
 		Bold(true)
 
-	// 顶部状态栏样式
+	// 顶部状态栏样式 - 不设置背景，由全局 fillBackground 处理
 	homeStatusBarStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("252")).
-		Background(lipgloss.Color("236")).
 		Padding(0, 1)
 
 	homeStatusConnectedStyle = lipgloss.NewStyle().
@@ -62,10 +61,11 @@ var (
 		Foreground(lipgloss.Color("196")).
 		Bold(true)
 
-	// 卡片样式 - 未选中
+	// 卡片样式 - 未选中（保留背景色用于区分卡片区域）
 	cardStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
+		Background(lipgloss.Color("236")).
 		Padding(1, 2).
 		Width(36)
 
@@ -73,7 +73,7 @@ var (
 	cardSelectedStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#6699FF")).
-		Background(lipgloss.Color("236")).
+		Background(lipgloss.Color("238")).
 		Padding(1, 2).
 		Width(36)
 
@@ -100,10 +100,9 @@ var (
 	cardHintSelectedStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("81"))
 
-	// 底部操作区样式
+	// 底部操作区样式 - 不设置背景，由全局 fillBackground 处理
 	homeFooterStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245")).
-		Background(lipgloss.Color("236")).
 		Padding(0, 1)
 
 	homeFooterKeyStyle = lipgloss.NewStyle().
