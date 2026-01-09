@@ -486,6 +486,48 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewHelp
 		}
 		return m, nil
+	
+	case "c":
+		// 全局快捷键：直达容器列表
+		// 排除：首页（有自己的处理）、容器列表（已经在）、搜索模式、Shell选择器
+		if m.showShellSelector {
+			return m, nil
+		}
+		if m.currentView == ViewWelcome {
+			// 首页有自己的处理逻辑
+			break
+		}
+		if m.currentView == ViewContainerList {
+			// 已经在容器列表，检查是否在搜索模式
+			if listView, ok := m.containerListView.(*ContainerListView); ok {
+				if listView.IsSearching() {
+					return m, nil // 让视图自己处理
+				}
+			}
+			return m, nil // 已经在容器列表
+		}
+		// 从其他页面直达容器列表
+		return m.enterContainerList()
+	
+	case "i":
+		// 全局快捷键：直达镜像列表
+		// 排除：首页、镜像列表（已经在）、搜索模式、Shell选择器
+		if m.showShellSelector {
+			return m, nil
+		}
+		if m.currentView == ViewWelcome {
+			// 首页不处理，让用户通过导航进入
+			break
+		}
+		if m.currentView == ViewImageList {
+			// 已经在镜像列表，检查是否在搜索模式
+			if m.imageListView != nil && m.imageListView.isSearching {
+				return m, nil // 让视图自己处理
+			}
+			return m, nil // 已经在镜像列表
+		}
+		// 从其他页面直达镜像列表
+		return m.enterImageList()
 	}
 	
 	// ESC 键 - 全局返回上一级（固定命令）
@@ -529,8 +571,8 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Compose 列表返回首页
 			m.currentView = ViewWelcome
 		case ViewImageList:
-			// 镜像列表返回容器列表
-			m.currentView = ViewContainerList
+			// 镜像列表返回首页
+			m.currentView = ViewWelcome
 		case ViewImageDetails:
 			// 镜像详情返回镜像列表
 			m.currentView = ViewImageList
@@ -573,25 +615,42 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	
-	// 先让 HomeView 处理按键（方向键、Tab、数字键等）
-	if m.homeView != nil {
-		_, cmd := m.homeView.Update(msg)
-		if cmd != nil {
-			return m, cmd
+	// 导航键由 HomeView 处理
+	switch msg.String() {
+	case "up", "down", "left", "right", "h", "j", "k", "l", "tab":
+		if m.homeView != nil {
+			m.homeView.Update(msg)
 		}
+		// 返回空命令，防止 delegateToCurrentView 再次处理
+		return m, func() tea.Msg { return nil }
+	case "r", "f5":
+		// 刷新
+		if m.homeView != nil {
+			return m, m.homeView.Init()
+		}
+		return m, nil
 	}
 	
 	switch msg.String() {
 	case "enter":
 		// 根据选中的卡片进入对应视图
 		if m.homeView != nil {
-			selectedCard := m.homeView.GetSelectedCard()
-			if selectedCard == 0 {
-				// 进入容器列表
+			// 根据选中的资源进入对应视图
+			if !m.homeView.IsResourceAvailable() {
+				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 该功能暂不可用", 3)
+			}
+			
+			switch m.homeView.GetSelectedResource() {
+			case ResourceContainers:
 				return m.enterContainerList()
-			} else if selectedCard == 1 {
-				// 进入 Compose 视图
+			case ResourceImages:
+				return m.enterImageList()
+			case ResourceCompose:
 				return m.enterComposeList()
+			case ResourceNetworks:
+				return m, m.SetTemporaryMessage(MsgInfo, "🌐 网络管理功能开发中...", 3)
+			case ResourceVolumes:
+				return m, m.SetTemporaryMessage(MsgInfo, "💾 卷管理功能开发中...", 3)
 			}
 		}
 		return m, nil
@@ -601,12 +660,36 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterContainerList()
 		
 	case "2":
+		// 进入镜像列表
+		return m.enterImageList()
+	
+	case "3", "4":
+		// 网络和卷管理（开发中）
+		return m, m.SetTemporaryMessage(MsgInfo, "🚧 该功能开发中...", 3)
+	
+	case "5":
 		// 进入 Compose 视图
 		return m.enterComposeList()
 		
 	case "c":
-		// 兼容旧的快捷键，进入容器列表
+		// 快捷键进入容器列表
 		return m.enterContainerList()
+	
+	case "i":
+		// 快捷键进入镜像列表
+		return m.enterImageList()
+	
+	case "n":
+		// 快捷键进入网络管理（开发中）
+		return m, m.SetTemporaryMessage(MsgInfo, "🌐 网络管理功能开发中...", 3)
+	
+	case "v":
+		// 快捷键进入卷管理（开发中）
+		return m, m.SetTemporaryMessage(MsgInfo, "💾 卷管理功能开发中...", 3)
+	
+	case "o":
+		// 快捷键进入 Compose 视图
+		return m.enterComposeList()
 	}
 	
 	return m, nil
@@ -637,6 +720,21 @@ func (m Model) enterComposeList() (tea.Model, tea.Cmd) {
 	
 	// 触发 Compose 列表视图的初始化，扫描项目
 	initCmd := m.composeListView.Init()
+	
+	return m, initCmd
+}
+
+// enterImageList 进入镜像列表视图
+func (m Model) enterImageList() (tea.Model, tea.Cmd) {
+	if m.imageListView == nil {
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 镜像列表视图未初始化", 3)
+	}
+	
+	m.previousView = m.currentView
+	m.currentView = ViewImageList
+	
+	// 触发镜像列表视图的初始化，加载数据
+	initCmd := m.imageListView.Init()
 	
 	return m, initCmd
 }
@@ -1060,8 +1158,12 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	
 	switch m.currentView {
 	case ViewWelcome:
-		if m.homeView != nil {
-			_, cmd = m.homeView.Update(msg)
+		// ViewWelcome 的按键已经在 handleWelcomeKeys 中处理了
+		// 这里只处理非按键消息（如 homeStatsLoadedMsg）
+		if _, isKeyMsg := msg.(tea.KeyMsg); !isKeyMsg {
+			if m.homeView != nil {
+				_, cmd = m.homeView.Update(msg)
+			}
 		}
 	case ViewContainerList:
 		if m.containerListView != nil {
