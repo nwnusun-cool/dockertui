@@ -149,10 +149,10 @@ type ImageHistory struct {
 
 // LogOptions 日志读取选项
 type LogOptions struct {
-	Follow     bool  // 是否持续跟随（类似 -f）
-	Tail       int   // 获取最后 N 行，0 表示全部
-	Timestamps bool  // 是否显示时间戳
-	Since      string // 从某个时间开始
+	Follow     bool   // 是否持续跟随（类似 -f）
+	Tail       int    // 获取最后 N 行：>0=最后N行, 0=不获取历史, <0=全部
+	Timestamps bool   // 是否显示时间戳
+	Since      string // 从某个时间开始（RFC3339 格式或 Unix 时间戳）
 }
 
 // ContainerEvent 表示 Docker 容器事件
@@ -506,14 +506,19 @@ func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opt
 	}
 
 	// 处理 Tail 参数
+	// Tail > 0: 获取最后 N 行
+	// Tail = 0: 不获取历史日志（通常配合 Follow 使用）
+	// Tail < 0: 获取全部日志
 	if opts.Tail > 0 {
 		tailStr := fmt.Sprintf("%d", opts.Tail)
 		logOpts.Tail = tailStr
-	} else if opts.Tail == 0 {
-		// 0 表示获取全部日志，不设置 Tail 即可
+	} else if opts.Tail < 0 {
+		// 获取全部日志
+		logOpts.Tail = "all"
 	}
+	// Tail = 0 时不设置，表示不获取历史日志
 
-	// 处理 Since 参数
+	// 处理 Since 参数（用于 Follow 模式，只获取指定时间之后的日志）
 	if opts.Since != "" {
 		logOpts.Since = opts.Since
 	}

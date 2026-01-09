@@ -84,6 +84,14 @@ func (v *ContainerDetailView) Update(msg tea.Msg) (View, tea.Cmd) {
 		return v, nil
 		
 	case tea.KeyMsg:
+		// 如果在资源监控标签页，先让 statsView 处理按键
+		if v.currentTab == 1 {
+			cmd := v.statsView.Update(msg)
+			if cmd != nil {
+				return v, cmd
+			}
+		}
+		
 		switch {
 		case key.Matches(msg, v.keys.Refresh):
 			v.loading = true

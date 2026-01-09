@@ -102,10 +102,12 @@ type Model struct {
 	composeListView     *ComposeListView  // Compose 项目列表视图
 	imageListView       *ImageListView    // 镜像列表视图
 	imageDetailsView    *ImageDetailsView // 镜像详情视图
+	shellSelector       *ShellSelector    // Shell 选择器
 	
 	// 全局状态字段
 	selectedContainerID string   // 当前选中的容器 ID
 	previousView        ViewType // 上一个视图（用于返回）
+	showShellSelector   bool     // 是否显示 Shell 选择器
 	
 	// 错误和状态显示
 	errorMsg        string    // 错误消息（致命错误，常驻显示）
@@ -138,6 +140,9 @@ func NewModel(dockerClient docker.Client) Model {
 		composeListView = NewComposeListView(composeClient, []string{"."})
 	}
 	
+	// 初始化 Shell 选择器
+	shellSelector := NewShellSelector(dockerClient)
+	
 	return Model{
 		dockerClient:        dockerClient,
 		currentView:         ViewWelcome,
@@ -148,6 +153,7 @@ func NewModel(dockerClient docker.Client) Model {
 		helpView:            helpView,
 		composeListView:     composeListView,
 		imageListView:       imageListView,
+		shellSelector:       shellSelector,
 		ready:               false,
 		dockerConnected:     true, // 默认假设已连接
 	}
@@ -211,6 +217,7 @@ type shellExitedMsg struct {
 type execShellMsg struct {
 	containerID   string
 	containerName string
+	shell         string // 指定的 Shell 路径
 }
 
 // execShellCmd 实现 tea.ExecCommand 接口
@@ -218,6 +225,7 @@ type execShellCmd struct {
 	dockerClient  docker.Client
 	containerID   string
 	containerName string
+	shell         string // 指定的 Shell 路径
 }
 
 // Run 实现 tea.ExecCommand 接口
@@ -225,8 +233,20 @@ func (e execShellCmd) Run() error {
 	// 清屏（进入 shell 前）
 	fmt.Print("\033[2J\033[H")
 	
+	// 获取 Shell 名称用于显示
+	shellName := e.shell
+	if shellName == "" {
+		shellName = "auto"
+	} else {
+		// 提取 Shell 名称（如 /bin/bash -> bash）
+		parts := strings.Split(shellName, "/")
+		if len(parts) > 0 {
+			shellName = parts[len(parts)-1]
+		}
+	}
+	
 	// 显示提示信息
-	fmt.Printf("\n\033[1;36m🐚 进入容器 Shell: %s\033[0m\n", e.containerName)
+	fmt.Printf("\n\033[1;36m🐚 进入容器 Shell: %s (%s)\033[0m\n", e.containerName, shellName)
 	fmt.Println("\033[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
 	fmt.Println("\033[33m提示:\033[0m")
 	fmt.Println("  • 输入 \033[1mexit\033[0m 或按 \033[1mCtrl+D\033[0m 退出 shell")
@@ -254,14 +274,21 @@ func (e execShellCmd) Run() error {
 		// 如果找不到 docker，回退到使用 Docker SDK
 		fmt.Println("\033[33m使用 Docker SDK 模式...\033[0m")
 		ctx := context.Background()
-		err := e.dockerClient.ExecShell(ctx, e.containerID, "")
+		err := e.dockerClient.ExecShell(ctx, e.containerID, e.shell)
 		fmt.Print("\033[2J\033[H")
 		return err
 	}
 	
-	// 使用 os/exec 执行 docker exec 命令
-	cmd := exec.Command(dockerPath, "exec", "-it", e.containerID, "/bin/sh", "-c", 
-		"if [ -x /bin/bash ]; then exec /bin/bash; elif [ -x /bin/ash ]; then exec /bin/ash; else exec /bin/sh; fi")
+	// 构建 docker exec 命令
+	var cmd *exec.Cmd
+	if e.shell != "" {
+		// 使用指定的 Shell
+		cmd = exec.Command(dockerPath, "exec", "-it", e.containerID, e.shell)
+	} else {
+		// 自动检测 Shell
+		cmd = exec.Command(dockerPath, "exec", "-it", e.containerID, "/bin/sh", "-c", 
+			"if [ -x /bin/bash ]; then exec /bin/bash; elif [ -x /bin/ash ]; then exec /bin/ash; else exec /bin/sh; fi")
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -293,22 +320,24 @@ func (e execShellCmd) SetStdout(w io.Writer) {}
 // SetStderr 实现 tea.ExecCommand 接口（可选）
 func (e execShellCmd) SetStderr(w io.Writer) {}
 
-// execShell 执行容器 shell
-func (m Model) execShell(containerID, containerName string) tea.Cmd {
+// execShell 执行容器 shell（带指定 Shell）
+func (m Model) execShellWithShell(containerID, containerName, shell string) tea.Cmd {
 	return func() tea.Msg {
 		return execShellMsg{
 			containerID:   containerID,
 			containerName: containerName,
+			shell:         shell,
 		}
 	}
 }
 
 // createExecShellCmd 创建执行 shell 的命令
-func (m Model) createExecShellCmd(containerID, containerName string) tea.ExecCommand {
+func (m Model) createExecShellCmd(containerID, containerName, shell string) tea.ExecCommand {
 	return execShellCmd{
 		dockerClient:  m.dockerClient,
 		containerID:   containerID,
 		containerName: containerName,
+		shell:         shell,
 	}
 }
 
@@ -325,7 +354,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execShellMsg:
 		// 执行 shell 命令
 		// 使用 tea.Exec 来暂时释放终端控制
-		return m, tea.Exec(m.createExecShellCmd(msg.containerID, msg.containerName), func(err error) tea.Msg {
+		return m, tea.Exec(m.createExecShellCmd(msg.containerID, msg.containerName, msg.shell), func(err error) tea.Msg {
 			return shellExitedMsg{err: err}
 		})
 	
@@ -379,9 +408,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.imageListView != nil {
 			m.imageListView.SetSize(msg.Width, msg.Height)
 		}
+		if m.shellSelector != nil {
+			m.shellSelector.SetSize(msg.Width, msg.Height)
+		}
+		return m, nil
+	
+	// 处理 Shell 选择器的消息
+	case shellsDetectedMsg, shellsDetectErrorMsg:
+		if m.showShellSelector && m.shellSelector != nil {
+			cmd := m.shellSelector.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 		
 	case tea.KeyMsg:
+		// 如果 Shell 选择器正在显示，优先处理
+		if m.showShellSelector && m.shellSelector != nil {
+			switch msg.String() {
+			case "enter":
+				// 选择 Shell 并执行
+				shell := m.shellSelector.GetSelectedShell()
+				if shell != "" {
+					m.showShellSelector = false
+					// 获取容器信息
+					containerID := m.shellSelector.containerID
+					containerName := m.shellSelector.containerName
+					return m, m.execShellWithShell(containerID, containerName, shell)
+				}
+			case "esc", "q":
+				// 取消选择
+				m.showShellSelector = false
+				return m, nil
+			default:
+				// 其他按键传递给选择器
+				cmd := m.shellSelector.Update(msg)
+				return m, cmd
+			}
+			return m, nil
+		}
+		
 		// 处理全局快捷键
 		newModel, cmd := m.handleGlobalKeys(msg)
 		if cmd != nil {
@@ -669,7 +734,7 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.SetTemporaryMessage(MsgInfo, "🔄 正在刷新容器列表...", 3)
 		
 	case "s":
-		// 进入容器 Shell
+		// 进入容器 Shell - 显示 Shell 选择器
 		if listView, ok := m.containerListView.(*ContainerListView); ok {
 			if container := listView.GetSelectedContainer(); container != nil {
 				// 检查容器是否在运行
@@ -680,8 +745,19 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// 设置选中的容器信息
 				m.selectedContainerID = container.ID
 				
-				// 执行 shell（这里需要特殊处理）
-				return m, m.execShell(container.ID, container.Name)
+				// 显示 Shell 选择器
+				m.showShellSelector = true
+				m.shellSelector.SetContainer(container.ID, container.Name)
+				m.shellSelector.SetSize(m.width, m.height)
+				m.shellSelector.SetCallbacks(
+					func(shell string) {
+						// 选择 Shell 后的回调会在 Update 中处理
+					},
+					func() {
+						// 取消选择的回调会在 Update 中处理
+					},
+				)
+				return m, m.shellSelector.Init()
 			} else {
 				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 请先选择一个容器", 3)
 			}
@@ -730,7 +806,7 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 未选择容器", 3)
 		
 	case "s":
-		// 进入容器 Shell
+		// 进入容器 Shell - 显示 Shell 选择器
 		if m.selectedContainerID != "" {
 			// 从详情视图获取容器名称和状态
 			containerName := m.selectedContainerID[:12]
@@ -747,8 +823,11 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 只能在运行中的容器执行 shell", 3)
 			}
 			
-			// 执行 shell
-			return m, m.execShell(m.selectedContainerID, containerName)
+			// 显示 Shell 选择器
+			m.showShellSelector = true
+			m.shellSelector.SetContainer(m.selectedContainerID, containerName)
+			m.shellSelector.SetSize(m.width, m.height)
+			return m, m.shellSelector.Init()
 		}
 		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 未选择容器", 3)
 	}
@@ -890,6 +969,11 @@ func visibleLength(s string) int {
 }
 
 func (m Model) View() string {
+	// 如果 Shell 选择器正在显示，优先渲染它
+	if m.showShellSelector && m.shellSelector != nil {
+		return m.shellSelector.View()
+	}
+	
 	var content string
 	
 	// 根据当前视图类型显示不同内容

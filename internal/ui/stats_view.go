@@ -12,6 +12,22 @@ import (
 	"docktui/internal/docker"
 )
 
+// TimeGranularity 时间粒度
+type TimeGranularity int
+
+const (
+	Granularity1s   TimeGranularity = iota // 1秒（最近1分钟，60个点）
+	Granularity5s                          // 5秒（最近5分钟，60个点）
+	Granularity10s                         // 10秒（最近10分钟，60个点）
+	Granularity30s                         // 30秒（最近30分钟，60个点）
+)
+
+// DataPoint 数据点
+type DataPoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
 // StatsView 资源监控视图组件
 type StatsView struct {
 	dockerClient docker.Client
@@ -23,9 +39,16 @@ type StatsView struct {
 	// 当前统计数据
 	currentStats *docker.ContainerStats
 	
-	// 历史数据（用于折线图）
+	// 历史数据（原始数据，1秒采样）
+	cpuRawData    []DataPoint
+	memoryRawData []DataPoint
+	
+	// 当前显示的数据（根据时间粒度聚合）
 	cpuHistory    []float64
 	memoryHistory []float64
+	
+	// 时间粒度
+	granularity TimeGranularity
 	
 	// 折线图组件
 	cpuChart    *Sparkline
@@ -54,8 +77,11 @@ type StatsView struct {
 func NewStatsView(dockerClient docker.Client) *StatsView {
 	return &StatsView{
 		dockerClient:  dockerClient,
+		cpuRawData:    make([]DataPoint, 0, 1800),    // 最多保存30分钟的原始数据（1秒采样）
+		memoryRawData: make([]DataPoint, 0, 1800),
 		cpuHistory:    make([]float64, 0, 60),
 		memoryHistory: make([]float64, 0, 60),
+		granularity:   Granularity1s,                 // 默认1秒粒度（显示最近1分钟）
 		cpuChart:      NewSparkline("CPU 使用率", 60, 8),
 		memoryChart:   NewSparkline("内存使用", 60, 8),
 	}
@@ -64,10 +90,13 @@ func NewStatsView(dockerClient docker.Client) *StatsView {
 // SetContainer 设置容器
 func (v *StatsView) SetContainer(containerID string) {
 	v.containerID = containerID
+	v.cpuRawData = make([]DataPoint, 0, 1800)
+	v.memoryRawData = make([]DataPoint, 0, 1800)
 	v.cpuHistory = make([]float64, 0, 60)
 	v.memoryHistory = make([]float64, 0, 60)
 	v.currentStats = nil
 	v.lastStatsTime = time.Time{}
+	v.granularity = Granularity1s
 }
 
 // SetSize 设置尺寸
@@ -132,6 +161,24 @@ func (v *StatsView) Update(msg tea.Msg) tea.Cmd {
 			return v.fetchStats
 		}
 		return nil
+	
+	case tea.KeyMsg:
+		// 处理时间粒度切换
+		key := msg.String()
+		switch key {
+		case "1":
+			v.setGranularity(Granularity1s)
+			return nil
+		case "2":
+			v.setGranularity(Granularity5s)
+			return nil
+		case "3":
+			v.setGranularity(Granularity10s)
+			return nil
+		case "4":
+			v.setGranularity(Granularity30s)
+			return nil
+		}
 	}
 	
 	return nil
@@ -164,29 +211,132 @@ func (v *StatsView) updateStats(stats *docker.ContainerStats) {
 	// 更新当前数据
 	v.currentStats = stats
 	
-	// 添加到历史数据
-	v.cpuHistory = append(v.cpuHistory, stats.CPUPercent)
-	if len(v.cpuHistory) > 60 {
-		v.cpuHistory = v.cpuHistory[1:]
-	}
+	// 添加到原始数据（1秒采样）
+	now := time.Now()
+	v.cpuRawData = append(v.cpuRawData, DataPoint{
+		Timestamp: now,
+		Value:     stats.CPUPercent,
+	})
 	
-	// 内存转换为 MB
 	memoryMB := float64(stats.MemoryUsage) / 1024 / 1024
-	v.memoryHistory = append(v.memoryHistory, memoryMB)
-	if len(v.memoryHistory) > 60 {
-		v.memoryHistory = v.memoryHistory[1:]
+	v.memoryRawData = append(v.memoryRawData, DataPoint{
+		Timestamp: now,
+		Value:     memoryMB,
+	})
+	
+	// 清理过期数据（保留最近30分钟，足够支持所有粒度）
+	cutoff := now.Add(-30 * time.Minute)
+	v.cpuRawData = v.cleanOldData(v.cpuRawData, cutoff)
+	v.memoryRawData = v.cleanOldData(v.memoryRawData, cutoff)
+	
+	// 根据当前粒度聚合数据
+	v.aggregateData()
+}
+
+// cleanOldData 清理过期数据
+func (v *StatsView) cleanOldData(data []DataPoint, cutoff time.Time) []DataPoint {
+	for i, point := range data {
+		if point.Timestamp.After(cutoff) {
+			return data[i:]
+		}
+	}
+	return []DataPoint{}
+}
+
+// setGranularity 设置时间粒度
+func (v *StatsView) setGranularity(g TimeGranularity) {
+	v.granularity = g
+	v.aggregateData()
+}
+
+// aggregateData 根据时间粒度聚合数据
+func (v *StatsView) aggregateData() {
+	var interval time.Duration
+	var maxPoints int
+	var timeRange string
+	
+	switch v.granularity {
+	case Granularity1s:
+		interval = 1 * time.Second
+		maxPoints = 60 // 1分钟
+		timeRange = "1分钟"
+	case Granularity5s:
+		interval = 5 * time.Second
+		maxPoints = 60 // 5分钟
+		timeRange = "5分钟"
+	case Granularity10s:
+		interval = 10 * time.Second
+		maxPoints = 60 // 10分钟
+		timeRange = "10分钟"
+	case Granularity30s:
+		interval = 30 * time.Second
+		maxPoints = 60 // 30分钟
+		timeRange = "30分钟"
 	}
 	
-	// 更新折线图数据
+	// 聚合 CPU 数据
+	v.cpuHistory = v.aggregateDataPoints(v.cpuRawData, interval, maxPoints)
+	
+	// 聚合内存数据
+	v.memoryHistory = v.aggregateDataPoints(v.memoryRawData, interval, maxPoints)
+	
+	// 更新折线图
 	v.cpuChart.SetData(v.cpuHistory)
 	v.cpuChart.Max = 100
 	v.cpuChart.Unit = "%"
-	v.cpuChart.Color = "82" // 绿色
+	v.cpuChart.Color = "82"
+	v.cpuChart.Title = fmt.Sprintf("CPU 使用率 (最近%s)", timeRange)
 	
-	v.memoryChart.SetData(v.memoryHistory)
-	v.memoryChart.Max = float64(stats.MemoryLimit) / 1024 / 1024
-	v.memoryChart.Unit = "MB"
-	v.memoryChart.Color = "81" // 青色
+	if v.currentStats != nil {
+		v.memoryChart.SetData(v.memoryHistory)
+		v.memoryChart.Max = float64(v.currentStats.MemoryLimit) / 1024 / 1024
+		v.memoryChart.Unit = "MB"
+		v.memoryChart.Color = "81"
+		v.memoryChart.Title = fmt.Sprintf("内存使用 (最近%s)", timeRange)
+	}
+}
+
+// aggregateDataPoints 聚合数据点
+func (v *StatsView) aggregateDataPoints(data []DataPoint, interval time.Duration, maxPoints int) []float64 {
+	if len(data) == 0 {
+		return []float64{}
+	}
+	
+	result := make([]float64, 0, maxPoints)
+	now := time.Now()
+	
+	// 从最早的时间点开始
+	startTime := now.Add(-time.Duration(maxPoints) * interval)
+	
+	for i := 0; i < maxPoints; i++ {
+		bucketStart := startTime.Add(time.Duration(i) * interval)
+		bucketEnd := bucketStart.Add(interval)
+		
+		// 收集该时间段内的所有数据点
+		var sum float64
+		var count int
+		
+		for _, point := range data {
+			if point.Timestamp.After(bucketStart) && point.Timestamp.Before(bucketEnd) {
+				sum += point.Value
+				count++
+			}
+		}
+		
+		// 计算平均值
+		if count > 0 {
+			result = append(result, sum/float64(count))
+		} else {
+			// 没有数据点，使用0或前一个值
+			if len(result) > 0 {
+				result = append(result, result[len(result)-1])
+			} else {
+				result = append(result, 0)
+			}
+		}
+	}
+	
+	return result
 }
 
 // Render 渲染视图
@@ -236,6 +386,9 @@ func (v *StatsView) renderSummary() string {
 	valueStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("252"))
 	
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245"))
+	
 	cpuColor := "82"  // 绿色
 	if stats.CPUPercent > 80 {
 		cpuColor = "196" // 红色
@@ -258,9 +411,24 @@ func (v *StatsView) renderSummary() string {
 	memLimit := formatBytes(stats.MemoryLimit)
 	memText := memStyle.Render(fmt.Sprintf("%s / %s (%.1f%%)", memUsed, memLimit, stats.MemoryPercent))
 	
-	content := labelStyle.Render("CPU: ") + cpuText + "    " +
+	// 第一行：当前数据
+	line1 := labelStyle.Render("CPU: ") + cpuText + "    " +
 		labelStyle.Render("内存: ") + memText + "    " +
 		labelStyle.Render("进程数: ") + valueStyle.Render(fmt.Sprintf("%d", stats.PIDs))
+	
+	// 第二行：时间粒度选择
+	granularityNames := []string{"1秒", "5秒", "10秒", "30秒"}
+	var granularityHints []string
+	for i, name := range granularityNames {
+		if TimeGranularity(i) == v.granularity {
+			granularityHints = append(granularityHints, labelStyle.Render(fmt.Sprintf("[%d] %s", i+1, name)))
+		} else {
+			granularityHints = append(granularityHints, hintStyle.Render(fmt.Sprintf("[%d] %s", i+1, name)))
+		}
+	}
+	line2 := hintStyle.Render("时间粒度: ") + strings.Join(granularityHints, "  ")
+	
+	content := line1 + "\n" + line2
 	
 	return "\n  " + boxStyle.Render(content)
 }

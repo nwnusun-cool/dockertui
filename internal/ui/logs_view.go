@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"docktui/internal/docker"
 )
@@ -30,12 +32,14 @@ type LogsView struct {
 	viewport   viewport.Model
 	followMode bool
 	wrapMode   bool
+	showTimestamp bool // 是否显示 Docker 时间戳
 	loading    bool
 	errorMsg   string
 	
 	followCancel    context.CancelFunc
 	followActive    bool
 	lastRefreshTime time.Time
+	lastLogTime     string // 最后一条日志的时间戳，用于 Follow 模式
 	logChan         chan string
 	chanClosed      bool
 	
@@ -52,14 +56,15 @@ func NewLogsView(dockerClient docker.Client) *LogsView {
 		PaddingRight(1)
 	
 	return &LogsView{
-		dockerClient: dockerClient,
-		viewport:     vp,
-		followMode:   false,
-		wrapMode:     true,
-		keys:         DefaultKeyMap(),
-		logChan:      make(chan string, 100),
-		width:        100,
-		height:       30,
+		dockerClient:  dockerClient,
+		viewport:      vp,
+		followMode:    false,
+		wrapMode:      true,
+		showTimestamp: false, // 默认不显示 Docker 时间戳
+		keys:          DefaultKeyMap(),
+		logChan:       make(chan string, 100),
+		width:         100,
+		height:        30,
 	}
 }
 
@@ -258,6 +263,11 @@ func (v *LogsView) renderStatusBar() string {
 	status := labelStyle.Render("Follow:") + " " + followStatus + sep +
 		labelStyle.Render("Wrap:") + " " + wrapStatus + sep +
 		labelStyle.Render("Lines:") + " " + valueStyle.Render(fmt.Sprintf("%d", len(v.logs)))
+	
+	// 显示加载的日志范围
+	if len(v.logs) > 0 {
+		status += sep + offStyle.Render("显示最近 1000 行")
+	}
 	
 	// 实时信息
 	if v.followMode && v.followActive && !v.lastRefreshTime.IsZero() {
@@ -484,7 +494,26 @@ type followRefreshMsg struct {
 
 type followContinueMsg struct{}
 
-// loadLogs 加载容器日志
+// processLogLine 处理日志行：提取时间戳并根据设置决定是否显示
+func (v *LogsView) processLogLine(line string) string {
+	// 提取时间戳（如果有）
+	// 格式：2024-01-08T12:34:56.789012345Z actual log content
+	if len(line) > 30 && line[0] >= '0' && line[0] <= '9' {
+		if idx := strings.Index(line, " "); idx > 0 && idx < 35 {
+			// 保存时间戳用于 Follow 功能
+			v.lastLogTime = line[:idx]
+			
+			// 如果不显示时间戳，去掉它
+			if !v.showTimestamp && idx+1 < len(line) {
+				return line[idx+1:]
+			}
+		}
+	}
+	
+	return line
+}
+
+// loadLogs 加载容器日志（初始加载，获取最近的日志）
 func (v *LogsView) loadLogs() tea.Msg {
 	if v.containerID == "" {
 		return logsLoadErrorMsg{err: fmt.Errorf("容器 ID 为空")}
@@ -493,10 +522,11 @@ func (v *LogsView) loadLogs() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
+	// 初始加载：获取最后 1000 行日志
 	opts := docker.LogOptions{
 		Follow:     false,
-		Tail:       500,
-		Timestamps: true,
+		Tail:       1000,
+		Timestamps: true,  // 保留时间戳用于 Follow 功能
 	}
 	
 	logReader, err := v.dockerClient.ContainerLogs(ctx, v.containerID, opts)
@@ -505,19 +535,44 @@ func (v *LogsView) loadLogs() tea.Msg {
 	}
 	defer logReader.Close()
 	
-	var logs []string
-	scanner := bufio.NewScanner(logReader)
+	// 使用 stdcopy 解析 Docker 多路复用流
+	var stdout, stderr bytes.Buffer
+	_, err = stdcopy.StdCopy(&stdout, &stderr, logReader)
+	if err != nil && err != io.EOF {
+		return logsLoadErrorMsg{err: fmt.Errorf("解析日志流失败: %w", err)}
+	}
 	
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) > 8 {
-			line = line[8:]
-		}
+	// 合并 stdout 和 stderr
+	var logs []string
+	
+	// 处理 stdout
+	stdoutScanner := bufio.NewScanner(&stdout)
+	// 设置更大的缓冲区以处理长行
+	buf := make([]byte, 0, 64*1024)
+	stdoutScanner.Buffer(buf, 1024*1024) // 最大 1MB 的行
+	
+	for stdoutScanner.Scan() {
+		line := stdoutScanner.Text()
+		line = v.processLogLine(line)
 		logs = append(logs, line)
 	}
 	
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		return logsLoadErrorMsg{err: err}
+	// 处理 stderr
+	stderrScanner := bufio.NewScanner(&stderr)
+	stderrScanner.Buffer(buf, 1024*1024)
+	
+	for stderrScanner.Scan() {
+		line := stderrScanner.Text()
+		line = v.processLogLine(line)
+		logs = append(logs, line)
+	}
+	
+	if err := stdoutScanner.Err(); err != nil {
+		return logsLoadErrorMsg{err: fmt.Errorf("读取 stdout 失败: %w", err)}
+	}
+	
+	if err := stderrScanner.Err(); err != nil {
+		return logsLoadErrorMsg{err: fmt.Errorf("读取 stderr 失败: %w", err)}
 	}
 	
 	return logsLoadedMsg{logs: logs}
@@ -575,7 +630,7 @@ func (v *LogsView) listenForLogs() tea.Cmd {
 	}
 }
 
-// readLogStream 读取日志流
+// readLogStream 读取日志流（Follow 模式：只获取新日志）
 func (v *LogsView) readLogStream() tea.Cmd {
 	return func() tea.Msg {
 		if v.containerID == "" {
@@ -596,8 +651,13 @@ func (v *LogsView) readLogStream() tea.Cmd {
 			
 			opts := docker.LogOptions{
 				Follow:     true,
-				Tail:       0,
-				Timestamps: true,
+				Tail:       0,        // 不获取历史日志
+				Timestamps: true,     // 保留时间戳用于 Follow 功能
+			}
+			
+			// 如果有最后一条日志的时间戳，使用 Since 参数只获取新日志
+			if v.lastLogTime != "" {
+				opts.Since = v.lastLogTime
 			}
 			
 			logReader, err := v.dockerClient.ContainerLogs(ctx, v.containerID, opts)
@@ -606,16 +666,53 @@ func (v *LogsView) readLogStream() tea.Cmd {
 			}
 			defer logReader.Close()
 			
-			scanner := bufio.NewScanner(logReader)
+			// 使用 pipe 来处理 stdcopy
+			stdoutReader, stdoutWriter := io.Pipe()
+			stderrReader, stderrWriter := io.Pipe()
+			
+			// 启动 stdcopy 解析
+			go func() {
+				defer stdoutWriter.Close()
+				defer stderrWriter.Close()
+				stdcopy.StdCopy(stdoutWriter, stderrWriter, logReader)
+			}()
+			
+			// 读取 stdout
+			go func() {
+				scanner := bufio.NewScanner(stdoutReader)
+				buf := make([]byte, 0, 64*1024)
+				scanner.Buffer(buf, 1024*1024)
+				
+				for scanner.Scan() {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						line := scanner.Text()
+						line = v.processLogLine(line)
+						
+						select {
+						case v.logChan <- line:
+						case <-ctx.Done():
+							return
+						}
+					}
+				}
+			}()
+			
+			// 读取 stderr
+			scanner := bufio.NewScanner(stderrReader)
+			buf := make([]byte, 0, 64*1024)
+			scanner.Buffer(buf, 1024*1024)
+			
 			for scanner.Scan() {
 				select {
 				case <-ctx.Done():
 					return
 				default:
 					line := scanner.Text()
-					if len(line) > 8 {
-						line = line[8:]
-					}
+					line = v.processLogLine(line)
+					
 					select {
 					case v.logChan <- line:
 					case <-ctx.Done():

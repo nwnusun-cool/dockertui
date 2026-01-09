@@ -434,9 +434,6 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case msg.String() == "ctrl+d":
 			// 删除容器（Delete）- Ctrl+D
 			return v, v.showRemoveConfirmDialog()
-		case msg.String() == "ctrl+a":
-			// 批量操作菜单 - Ctrl+A
-			return v, v.showBatchOperationsMenu()
 		default:
 			// 其他按键交给 table 处理
 			v.tableModel, _ = v.tableModel.Update(msg)
@@ -829,7 +826,7 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<Ctrl+A>", "Batch") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
+	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
 	lines = append(lines, "  "+row3Label+row3Keys)
 	
 	// 第四行：查看操作
@@ -1545,19 +1542,6 @@ func (v *ContainerListView) togglePauseContainer() tea.Cmd {
 		return containerOperationSuccessMsg{
 			operation: operation,
 			container: container.Name,
-		}
-	}
-}
-
-// showBatchOperationsMenu 显示批量操作菜单
-func (v *ContainerListView) showBatchOperationsMenu() tea.Cmd {
-	// TODO: 实现批量操作菜单
-	// 暂时返回提示消息
-	return func() tea.Msg {
-		return containerOperationErrorMsg{
-			operation: "批量操作",
-			container: "",
-			err:       fmt.Errorf("批量操作功能开发中..."),
 		}
 	}
 }
