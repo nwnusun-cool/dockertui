@@ -473,10 +473,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleGlobalKeys 处理全局快捷键
 func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// 如果镜像列表视图的拉取输入框或打标签输入框可见，不处理任何全局快捷键
+	// 如果镜像列表视图的拉取输入框或打标签输入框或错误弹窗可见，不处理任何全局快捷键
 	if m.currentView == ViewImageList && m.imageListView != nil {
 		if (m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible()) ||
-		   (m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible()) {
+		   (m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible()) ||
+		   m.imageListView.HasError() {
 			return m, nil
 		}
 	}
@@ -554,6 +555,10 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.imageListView.showConfirmDialog {
 				return m, nil // 让视图自己处理
 			}
+			// 检查错误弹窗
+			if m.imageListView.HasError() {
+				return m, nil // 让视图自己处理
+			}
 			// 检查搜索模式
 			if m.imageListView.isSearching {
 				return m, nil // 让视图自己处理
@@ -563,7 +568,7 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// 特殊情况：如果在容器列表有弹窗或搜索模式
 		if m.currentView == ViewContainerList {
 			if listView, ok := m.containerListView.(*ContainerListView); ok {
-				if listView.IsSearching() || listView.showConfirmDialog {
+				if listView.IsSearching() || listView.showConfirmDialog || listView.IsEditViewVisible() || listView.HasError() {
 					return m, nil // 让视图自己处理
 				}
 			}
@@ -769,9 +774,9 @@ func (m Model) enterImageList() (tea.Model, tea.Cmd) {
 
 // handleContainerListKeys 处理容器列表视图的快捷键
 func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// 如果处于搜索模式或显示确认对话框，让视图自己处理
+	// 如果处于搜索模式、显示确认对话框、编辑视图或错误弹窗，让视图自己处理
 	if listView, ok := m.containerListView.(*ContainerListView); ok {
-		if listView.IsSearching() || listView.showConfirmDialog {
+		if listView.IsSearching() || listView.showConfirmDialog || listView.IsEditViewVisible() || listView.HasError() {
 			return m, nil  // 返回 nil，让 Update 传递给视图
 		}
 	}
@@ -1006,6 +1011,11 @@ func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	
 	// 如果镜像列表视图正在显示对话框，不拦截任何按键
 	if m.imageListView != nil && m.imageListView.showConfirmDialog {
+		return m, nil
+	}
+	
+	// 如果镜像列表视图正在显示错误弹窗，不拦截任何按键
+	if m.imageListView != nil && m.imageListView.HasError() {
 		return m, nil
 	}
 	

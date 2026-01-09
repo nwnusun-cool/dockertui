@@ -103,7 +103,7 @@ type ContainerListView struct {
 	tableModel    table.Model        // bubbles/table 组件（保留兼容）
 	scrollTable   *ScrollableTable   // 可水平滚动的表格
 	loading       bool               // 是否正在加载
-	errorMsg      string             // 错误信息
+	errorMsg      string             // 错误信息（初始加载失败时使用）
 	successMsg    string             // 成功消息
 	successMsgTime time.Time         // 成功消息显示时间
 	
@@ -122,6 +122,12 @@ type ContainerListView struct {
 	confirmAction     string // 确认的操作类型: "remove"
 	confirmContainer  *docker.Container // 待操作的容器
 	confirmSelection  int    // 确认对话框中的选择: 0=Cancel, 1=OK
+	
+	// 编辑视图
+	editView *ContainerEditView // 容器配置编辑视图
+	
+	// 错误弹窗
+	errorDialog *ErrorDialog // 错误弹窗组件
 	
 	// 快捷键管理（R3）
 	keys KeyMap
@@ -179,6 +185,8 @@ func NewContainerListView(dockerClient docker.Client) *ContainerListView {
 		keys:         DefaultKeyMap(),
 		searchQuery:  "",
 		isSearching:  false,
+		editView:     NewContainerEditView(),
+		errorDialog:  NewErrorDialog(),
 	}
 }
 
@@ -255,8 +263,11 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		)
 		
 	case containerOperationErrorMsg:
-		// 容器操作失败，显示错误信息
-		v.errorMsg = fmt.Sprintf("❌ %s失败 (%s): %v", msg.operation, msg.container, msg.err)
+		// 容器操作失败，显示错误弹窗
+		errMsg := fmt.Sprintf("%s失败 (%s): %v", msg.operation, msg.container, msg.err)
+		if v.errorDialog != nil {
+			v.errorDialog.ShowError(errMsg)
+		}
 		v.successMsg = "" // 清除成功消息
 		return v, nil
 	
@@ -273,8 +284,34 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			v.successMsg = ""
 		}
 		return v, nil
+	
+	case containerEditReadyMsg:
+		// 容器详情获取成功，显示编辑视图
+		if v.editView != nil {
+			v.editView.Show(msg.container, msg.details)
+		}
+		return v, nil
 		
 	case tea.KeyMsg:
+		// 优先处理错误弹窗
+		if v.errorDialog != nil && v.errorDialog.IsVisible() {
+			if v.errorDialog.Update(msg) {
+				return v, nil
+			}
+		}
+		
+		// 优先处理编辑视图
+		if v.editView != nil && v.editView.IsVisible() {
+			confirmed, handled, cmd := v.editView.Update(msg)
+			if confirmed {
+				// 用户确认修改
+				return v, v.updateContainerConfig()
+			}
+			if handled {
+				return v, cmd
+			}
+		}
+		
 		// 优先处理确认对话框的按键
 		if v.showConfirmDialog {
 			// 检测所有可能的方向键表示方式
@@ -372,7 +409,7 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case key.Matches(msg, v.keys.Refresh):
 			// 手动刷新列表（E3.2 - 保留手动刷新）
 			v.loading = true
-			v.errorMsg = ""
+			v.errorMsg = "" // 清除错误信息
 			return v, v.loadContainers
 		case msg.String() == "/":
 			// 进入搜索模式（L4.2）
@@ -434,6 +471,9 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case msg.String() == "ctrl+d":
 			// 删除容器（Delete）- Ctrl+D
 			return v, v.showRemoveConfirmDialog()
+		case msg.String() == "e":
+			// 编辑容器配置（Edit）
+			return v, v.showEditView()
 		default:
 			// 其他按键交给 table 处理
 			v.tableModel, _ = v.tableModel.Update(msg)
@@ -532,21 +572,32 @@ func (v *ContainerListView) View() string {
 		return s
 	}
 	
-	// 错误状态
-	if v.errorMsg != "" {
-		errorContent := lipgloss.JoinVertical(lipgloss.Left,
+	// 错误状态 - 没有容器数据时显示阻塞式错误框（无法关闭）
+	if v.errorMsg != "" && len(v.containers) == 0 {
+		// 分割错误信息，支持多行显示
+		errLines := []string{""}
+		errText := v.errorMsg
+		// 移除开头的 ❌ 符号（如果有的话，因为我们会重新添加）
+		errText = strings.TrimPrefix(errText, "❌ ")
+		
+		// 按 80 字符换行
+		maxLineLen := 70
+		for len(errText) > maxLineLen {
+			errLines = append(errLines, errorMsgStyle.Render(errText[:maxLineLen]))
+			errText = errText[maxLineLen:]
+		}
+		if errText != "" {
+			errLines = append(errLines, errorMsgStyle.Render(errText))
+		}
+		
+		errLines = append(errLines,
 			"",
-			errorMsgStyle.Render("❌ 加载失败: "+v.truncateForBox(v.errorMsg, 48)),
-			"",
-			statusBarLabelStyle.Render("💡 可能的原因:"),
-			searchHintStyle.Render("   • Docker 守护进程未运行"),
-			searchHintStyle.Render("   • 网络连接问题（远程 Docker）"),
-			searchHintStyle.Render("   • 权限不足"),
-			"",
-			statusBarKeyStyle.Render("按 r 重新加载") + searchHintStyle.Render(" 或 ") + statusBarKeyStyle.Render("按 b 返回主页"),
+			statusBarKeyStyle.Render("按 r 重新加载") + searchHintStyle.Render(" 或 ") + statusBarKeyStyle.Render("按 Esc 返回"),
 			"",
 		)
-		s += "\n  " + stateBoxStyle.Render(errorContent) + "\n"
+		
+		errorContent := lipgloss.JoinVertical(lipgloss.Left, errLines...)
+		s += "\n  " + stateBoxStyle.Width(v.width - 10).Render(errorContent) + "\n"
 		return s
 	}
 	
@@ -626,6 +677,16 @@ func (v *ContainerListView) View() string {
 	// 如果显示确认对话框，叠加在内容上
 	if v.showConfirmDialog {
 		s = v.overlayDialog(s)
+	}
+	
+	// 如果显示编辑视图，叠加在内容上
+	if v.editView != nil && v.editView.IsVisible() {
+		s = v.overlayEditView(s)
+	}
+	
+	// 如果显示错误弹窗，叠加在内容上
+	if v.errorDialog != nil && v.errorDialog.IsVisible() {
+		s = v.errorDialog.Overlay(s)
 	}
 	
 	return s
@@ -826,7 +887,7 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
+	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<e>", "Edit") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
 	lines = append(lines, "  "+row3Label+row3Keys)
 	
 	// 第四行：查看操作
@@ -993,6 +1054,16 @@ func (v *ContainerListView) SetSize(width, height int) {
 	// 更新可滚动表格尺寸
 	if v.scrollTable != nil {
 		v.scrollTable.SetSize(width-4, tableHeight)
+	}
+	
+	// 更新编辑视图宽度
+	if v.editView != nil {
+		v.editView.SetWidth(width)
+	}
+	
+	// 更新错误弹窗宽度
+	if v.errorDialog != nil {
+		v.errorDialog.SetWidth(width)
 	}
 	
 	// 根据实际数据内容计算最优列宽
@@ -1544,4 +1615,136 @@ func (v *ContainerListView) togglePauseContainer() tea.Cmd {
 			container: container.Name,
 		}
 	}
+}
+
+
+// showEditView 显示编辑视图
+func (v *ContainerListView) showEditView() tea.Cmd {
+	container := v.GetSelectedContainer()
+	if container == nil {
+		return func() tea.Msg {
+			return containerOperationErrorMsg{
+				operation: "编辑容器",
+				container: "",
+				err:       fmt.Errorf("请先选择一个容器"),
+			}
+		}
+	}
+
+	// 获取容器详情
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		details, err := v.dockerClient.ContainerDetails(ctx, container.ID)
+		if err != nil {
+			return containerOperationErrorMsg{
+				operation: "获取容器详情",
+				container: container.Name,
+				err:       err,
+			}
+		}
+
+		return containerEditReadyMsg{
+			container: container,
+			details:   details,
+		}
+	}
+}
+
+// containerEditReadyMsg 容器编辑准备就绪消息
+type containerEditReadyMsg struct {
+	container *docker.Container
+	details   *docker.ContainerDetails
+}
+
+// containerUpdateSuccessMsg 容器更新成功消息
+type containerUpdateSuccessMsg struct {
+	container string
+}
+
+// updateContainerConfig 更新容器配置
+func (v *ContainerListView) updateContainerConfig() tea.Cmd {
+	if v.editView == nil {
+		return nil
+	}
+
+	containerID := v.editView.GetContainerID()
+	containerName := v.editView.GetContainerName()
+	config := v.editView.GetConfig()
+
+	// 隐藏编辑视图
+	v.editView.Hide()
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err := v.dockerClient.UpdateContainer(ctx, containerID, config)
+		if err != nil {
+			return containerOperationErrorMsg{
+				operation: "更新容器配置",
+				container: containerName,
+				err:       err,
+			}
+		}
+
+		return containerOperationSuccessMsg{
+			operation: "更新配置",
+			container: containerName,
+		}
+	}
+}
+
+// overlayEditView 将编辑视图叠加到现有内容上
+func (v *ContainerListView) overlayEditView(baseContent string) string {
+	if v.editView == nil {
+		return baseContent
+	}
+
+	// 将基础内容按行分割
+	lines := strings.Split(baseContent, "\n")
+
+	// 编辑视图尺寸
+	editHeight := 16
+
+	// 计算编辑视图应该插入的位置（垂直居中）
+	insertLine := 0
+	if len(lines) > editHeight {
+		insertLine = (len(lines) - editHeight) / 2
+	}
+
+	// 获取编辑视图内容
+	editContent := v.editView.View()
+	editLines := strings.Split(editContent, "\n")
+
+	// 构建最终输出
+	var result strings.Builder
+
+	for i := 0; i < len(lines); i++ {
+		editIdx := i - insertLine
+		if editIdx >= 0 && editIdx < len(editLines) {
+			// 在这个位置显示编辑视图行
+			result.WriteString(editLines[editIdx])
+		} else if i < len(lines) {
+			// 显示原始内容
+			result.WriteString(lines[i])
+		}
+
+		if i < len(lines)-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
+// IsEditViewVisible 返回编辑视图是否可见
+func (v *ContainerListView) IsEditViewVisible() bool {
+	return v.editView != nil && v.editView.IsVisible()
+}
+
+// HasError 返回是否有错误信息显示
+func (v *ContainerListView) HasError() bool {
+	return v.errorDialog != nil && v.errorDialog.IsVisible()
 }

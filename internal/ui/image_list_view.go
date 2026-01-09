@@ -78,7 +78,7 @@ type ImageListView struct {
 	tableModel     table.Model    // bubbles/table 组件（保留兼容）
 	scrollTable    *ScrollableTable // 可水平滚动的表格
 	loading        bool           // 是否正在加载
-	errorMsg       string         // 错误信息
+	errorMsg       string         // 错误信息（初始加载失败时使用）
 	successMsg     string         // 成功消息
 	successMsgTime time.Time      // 成功消息显示时间
 
@@ -111,6 +111,9 @@ type ImageListView struct {
 
 	// 打标签功能
 	tagInput *TagInputView // 打标签输入框
+	
+	// 错误弹窗
+	errorDialog *ErrorDialog // 错误弹窗组件
 }
 
 // NewImageListView 创建镜像列表视图
@@ -166,6 +169,7 @@ func NewImageListView(dockerClient docker.Client) *ImageListView {
 		pullInput:    NewPullInputView(),
 		taskBar:      NewTaskBar(),
 		tagInput:     NewTagInputView(),
+		errorDialog:  NewErrorDialog(),
 	}
 }
 
@@ -210,8 +214,11 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		)
 
 	case imageOperationErrorMsg:
-		// 镜像操作失败，显示错误信息
-		v.errorMsg = fmt.Sprintf("❌ %s失败 (%s): %v", msg.operation, msg.image, msg.err)
+		// 镜像操作失败，显示错误弹窗
+		errMsg := fmt.Sprintf("%s失败 (%s): %v", msg.operation, msg.image, msg.err)
+		if v.errorDialog != nil {
+			v.errorDialog.ShowError(errMsg)
+		}
 		v.successMsg = "" // 清除成功消息
 		return v, nil
 
@@ -241,8 +248,11 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 				v.taskBar.ListenForEvents(),
 			)
 		case task.EventFailed:
-			// 任务失败
-			v.errorMsg = fmt.Sprintf("❌ %s: %v", event.TaskName, event.Error)
+			// 任务失败，显示错误弹窗
+			errMsg := fmt.Sprintf("%s: %v", event.TaskName, event.Error)
+			if v.errorDialog != nil {
+				v.errorDialog.ShowError(errMsg)
+			}
 			return v, v.taskBar.ListenForEvents()
 		case task.EventProgress, task.EventStarted:
 			// 进度更新或任务开始，继续监听
@@ -261,6 +271,13 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		return v, nil
 
 	case tea.KeyMsg:
+		// 优先处理错误弹窗
+		if v.errorDialog != nil && v.errorDialog.IsVisible() {
+			if v.errorDialog.Update(msg) {
+				return v, nil
+			}
+		}
+		
 		// 优先处理拉取输入框
 		if v.pullInput.IsVisible() {
 			confirmed, handled, cmd := v.pullInput.Update(msg)
@@ -616,6 +633,11 @@ func (v *ImageListView) View() string {
 	if v.showConfirmDialog {
 		s = v.overlayDialog(s)
 	}
+	
+	// 如果显示错误弹窗，叠加在内容上
+	if v.errorDialog != nil && v.errorDialog.IsVisible() {
+		s = v.errorDialog.Overlay(s)
+	}
 
 	return s
 }
@@ -640,6 +662,11 @@ func (v *ImageListView) SetSize(width, height int) {
 	// 更新拉取输入框和任务栏尺寸
 	v.pullInput.SetWidth(width)
 	v.taskBar.SetWidth(width)
+	
+	// 更新错误弹窗宽度
+	if v.errorDialog != nil {
+		v.errorDialog.SetWidth(width)
+	}
 }
 
 // renderStatusBar 渲染顶部状态栏
@@ -1515,4 +1542,9 @@ func (v *ImageListView) tagImage(sourceImageID, repository, tag string) tea.Cmd 
 			image:     targetRef,
 		}
 	}
+}
+
+// HasError 返回是否有错误弹窗显示
+func (v *ImageListView) HasError() bool {
+	return v.errorDialog != nil && v.errorDialog.IsVisible()
 }

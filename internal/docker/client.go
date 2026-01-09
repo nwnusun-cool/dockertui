@@ -147,6 +147,22 @@ type ImageHistory struct {
 	Comment   string    // 注释
 }
 
+// ContainerUpdateConfig 容器更新配置
+// 注意：CPU/内存限制仅在 Linux 原生 Docker 或 WSL2 后端支持
+type ContainerUpdateConfig struct {
+	// 重启策略
+	RestartPolicy     string // no, always, on-failure, unless-stopped
+	RestartMaxRetries int    // on-failure 时的最大重试次数
+
+	// CPU 限制（仅 Linux）
+	CPUShares int64 // CPU 份额（相对权重，默认 1024）
+	NanoCPUs  int64 // CPU 限制（纳秒，1 CPU = 1e9）
+
+	// 内存限制（仅 Linux）
+	Memory     int64 // 内存限制（字节）
+	MemorySwap int64 // 内存+交换空间限制（字节），-1 表示不限制交换空间
+}
+
 // LogOptions 日志读取选项
 type LogOptions struct {
 	Follow     bool   // 是否持续跟随（类似 -f）
@@ -216,6 +232,10 @@ type Client interface {
 
 	// UnpauseContainer 恢复暂停的容器
 	UnpauseContainer(ctx context.Context, containerID string) error
+
+	// UpdateContainer 更新容器配置
+	// 支持修改：重启策略、CPU 限制、内存限制等
+	UpdateContainer(ctx context.Context, containerID string, config ContainerUpdateConfig) error
 
 	// ===== 镜像管理 =====
 
@@ -1105,6 +1125,57 @@ func (c *LocalClient) UnpauseContainer(ctx context.Context, containerID string) 
 	err := c.cli.ContainerUnpause(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("恢复容器失败: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateContainer 更新容器配置
+func (c *LocalClient) UpdateContainer(ctx context.Context, containerID string, config ContainerUpdateConfig) error {
+	if c == nil || c.cli == nil {
+		return fmt.Errorf("Docker 客户端未初始化")
+	}
+
+	// 构建更新配置
+	updateConfig := container.UpdateConfig{
+		Resources: container.Resources{},
+	}
+
+	// 设置 CPU 限制
+	if config.CPUShares > 0 {
+		updateConfig.Resources.CPUShares = config.CPUShares
+	}
+	if config.NanoCPUs > 0 {
+		updateConfig.Resources.NanoCPUs = config.NanoCPUs
+	}
+
+	// 设置内存限制
+	// 注意：必须同时设置 MemorySwap，否则可能报错
+	if config.Memory > 0 {
+		updateConfig.Resources.Memory = config.Memory
+		// MemorySwap = -1 表示不限制交换空间（内存 + 无限交换）
+		// MemorySwap = Memory 表示禁用交换空间
+		// MemorySwap = Memory * 2 表示交换空间等于内存
+		if config.MemorySwap != 0 {
+			updateConfig.Resources.MemorySwap = config.MemorySwap
+		} else {
+			// 默认设置为 -1（不限制交换空间），避免与现有 memoryswap 冲突
+			updateConfig.Resources.MemorySwap = -1
+		}
+	}
+
+	// 设置重启策略
+	if config.RestartPolicy != "" {
+		updateConfig.RestartPolicy = container.RestartPolicy{
+			Name:              container.RestartPolicyMode(config.RestartPolicy),
+			MaximumRetryCount: config.RestartMaxRetries,
+		}
+	}
+
+	// 调用 Docker SDK 更新容器
+	_, err := c.cli.ContainerUpdate(ctx, containerID, updateConfig)
+	if err != nil {
+		return err
 	}
 
 	return nil
