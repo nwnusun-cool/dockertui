@@ -473,6 +473,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleGlobalKeys 处理全局快捷键
 func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// 如果镜像列表视图的拉取输入框或打标签输入框可见，不处理任何全局快捷键
+	if m.currentView == ViewImageList && m.imageListView != nil {
+		if (m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible()) ||
+		   (m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible()) {
+			return m, nil
+		}
+	}
+	
 	// 首先处理无条件全局快捷键（这些键在任何视图都优先处理）
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -532,11 +540,31 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	
 	// ESC 键 - 全局返回上一级（固定命令）
 	if msg.String() == "esc" {
-		// 特殊情况：如果在容器列表的搜索模式，先退出搜索
+		// 特殊情况：如果有弹窗或输入框显示，让视图自己处理
+		if m.currentView == ViewImageList && m.imageListView != nil {
+			// 检查拉取输入框
+			if m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible() {
+				return m, nil // 让视图自己处理
+			}
+			// 检查打标签输入框
+			if m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible() {
+				return m, nil // 让视图自己处理
+			}
+			// 检查确认对话框
+			if m.imageListView.showConfirmDialog {
+				return m, nil // 让视图自己处理
+			}
+			// 检查搜索模式
+			if m.imageListView.isSearching {
+				return m, nil // 让视图自己处理
+			}
+		}
+		
+		// 特殊情况：如果在容器列表有弹窗或搜索模式
 		if m.currentView == ViewContainerList {
 			if listView, ok := m.containerListView.(*ContainerListView); ok {
-				if listView.IsSearching() {
-					return m, nil // 让视图自己处理退出搜索
+				if listView.IsSearching() || listView.showConfirmDialog {
+					return m, nil // 让视图自己处理
 				}
 			}
 		}
@@ -965,6 +993,16 @@ func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 镜像列表视图的按键大部分由视图自己处理
 	// 这里只处理需要切换视图的按键
+	
+	// 如果镜像列表视图正在显示拉取输入框，不拦截任何按键
+	if m.imageListView != nil && m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible() {
+		return m, nil
+	}
+	
+	// 如果镜像列表视图正在显示打标签输入框，不拦截任何按键
+	if m.imageListView != nil && m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible() {
+		return m, nil
+	}
 	
 	// 如果镜像列表视图正在显示对话框，不拦截任何按键
 	if m.imageListView != nil && m.imageListView.showConfirmDialog {

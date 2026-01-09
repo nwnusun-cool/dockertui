@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"docktui/internal/docker"
+	"docktui/internal/task"
 )
 
 // 镜像列表视图样式定义 - 使用自适应颜色
@@ -96,12 +97,20 @@ type ImageListView struct {
 
 	// 确认对话框状态
 	showConfirmDialog bool              // 是否显示确认对话框
-	confirmAction     string            // 确认的操作类型: "remove", "prune"
+	confirmAction     string            // 确认的操作类型: "remove", "prune", "pull"
 	confirmImage      *docker.Image     // 待操作的镜像
 	confirmSelection  int               // 确认对话框中的选择: 0=Cancel, 1=OK
+	confirmPullRef    string            // 待拉取的镜像引用
 
 	// 快捷键管理
 	keys KeyMap
+
+	// 拉取功能
+	pullInput *PullInputView // 拉取输入框
+	taskBar   *TaskBar       // 任务进度条
+
+	// 打标签功能
+	tagInput *TagInputView // 打标签输入框
 }
 
 // NewImageListView 创建镜像列表视图
@@ -154,6 +163,9 @@ func NewImageListView(dockerClient docker.Client) *ImageListView {
 		isSearching:  false,
 		filterType:   "all",
 		sortBy:       "created",
+		pullInput:    NewPullInputView(),
+		taskBar:      NewTaskBar(),
+		tagInput:     NewTagInputView(),
 	}
 }
 
@@ -203,6 +215,11 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		v.successMsg = "" // 清除成功消息
 		return v, nil
 
+	case imageInUseErrorMsg:
+		// 镜像被容器引用，提示用户是否强制删除
+		v.showForceRemoveConfirmDialog(msg.image)
+		return v, nil
+
 	case clearSuccessMessageMsg:
 		// 清除成功消息
 		if time.Since(v.successMsgTime) >= 3*time.Second {
@@ -210,7 +227,78 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		}
 		return v, nil
 
+	case TaskEventMsg:
+		// 处理任务事件
+		event := msg.Event
+		switch event.Type {
+		case task.EventCompleted:
+			// 任务完成，刷新镜像列表
+			v.successMsg = fmt.Sprintf("✅ %s", event.Message)
+			v.successMsgTime = time.Now()
+			return v, tea.Batch(
+				v.loadImages,
+				v.clearSuccessMessageAfter(3*time.Second),
+				v.taskBar.ListenForEvents(),
+			)
+		case task.EventFailed:
+			// 任务失败
+			v.errorMsg = fmt.Sprintf("❌ %s: %v", event.TaskName, event.Error)
+			return v, v.taskBar.ListenForEvents()
+		case task.EventProgress, task.EventStarted:
+			// 进度更新或任务开始，继续监听
+			// 不需要做任何事情，View() 会自动从 TaskBar 获取最新状态
+			return v, v.taskBar.ListenForEvents()
+		default:
+			return v, v.taskBar.ListenForEvents()
+		}
+
+	case taskTickMsg:
+		// 定时刷新任务状态
+		if v.taskBar.HasActiveTasks() {
+			// 继续定时刷新
+			return v, v.scheduleTaskTick()
+		}
+		return v, nil
+
 	case tea.KeyMsg:
+		// 优先处理拉取输入框
+		if v.pullInput.IsVisible() {
+			confirmed, handled, cmd := v.pullInput.Update(msg)
+			if confirmed {
+				// 用户确认拉取
+				imageRef := v.pullInput.Value()
+				v.pullInput.Hide()
+				// 直接启动拉取任务
+				v.startPullTaskSync(imageRef)
+				// 同时启动事件监听和定时刷新
+				return v, tea.Batch(
+					v.taskBar.ListenForEvents(),
+					v.scheduleTaskTick(),
+				)
+			}
+			if handled {
+				// 事件已被处理，阻止继续传播
+				return v, cmd
+			}
+		}
+
+		// 优先处理打标签输入框
+		if v.tagInput.IsVisible() {
+			confirmed, handled, cmd := v.tagInput.Update(msg)
+			if confirmed {
+				// 用户确认打标签
+				repo, tag := v.tagInput.GetValues()
+				sourceImageID := v.tagInput.sourceImageID
+				v.tagInput.Hide()
+				// 执行打标签操作
+				return v, v.tagImage(sourceImageID, repo, tag)
+			}
+			if handled {
+				// 事件已被处理，阻止继续传播
+				return v, cmd
+			}
+		}
+
 		// 优先处理确认对话框的按键
 		if v.showConfirmDialog {
 			switch msg.Type {
@@ -224,24 +312,32 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 					// 选择了 OK，执行操作
 					action := v.confirmAction
 					image := v.confirmImage
+					pullRef := v.confirmPullRef
 
 					// 重置对话框状态
 					v.showConfirmDialog = false
 					v.confirmAction = ""
 					v.confirmImage = nil
+					v.confirmPullRef = ""
 					v.confirmSelection = 0
 
 					// 执行操作
 					if action == "remove" && image != nil {
-						return v, v.removeImage(image)
+						return v, v.removeImage(image, false) // 普通删除
+					} else if action == "force_remove" && image != nil {
+						return v, v.removeImage(image, true) // 强制删除
 					} else if action == "prune" {
 						return v, v.pruneImages()
+					} else if action == "pull" && pullRef != "" {
+						v.startPullTaskSync(pullRef)
+						return v, v.taskBar.ListenForEvents()
 					}
 				} else {
 					// 选择了 Cancel，取消操作
 					v.showConfirmDialog = false
 					v.confirmAction = ""
 					v.confirmImage = nil
+					v.confirmPullRef = ""
 					v.confirmSelection = 0
 				}
 				return v, nil
@@ -250,6 +346,7 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 				v.showConfirmDialog = false
 				v.confirmAction = ""
 				v.confirmImage = nil
+				v.confirmPullRef = ""
 				v.confirmSelection = 0
 				return v, nil
 			case tea.KeyRunes:
@@ -268,24 +365,32 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 					// 选择了 OK，执行操作
 					action := v.confirmAction
 					image := v.confirmImage
+					pullRef := v.confirmPullRef
 
 					// 重置对话框状态
 					v.showConfirmDialog = false
 					v.confirmAction = ""
 					v.confirmImage = nil
+					v.confirmPullRef = ""
 					v.confirmSelection = 0
 
 					// 执行操作
 					if action == "remove" && image != nil {
-						return v, v.removeImage(image)
+						return v, v.removeImage(image, false) // 普通删除
+					} else if action == "force_remove" && image != nil {
+						return v, v.removeImage(image, true) // 强制删除
 					} else if action == "prune" {
 						return v, v.pruneImages()
+					} else if action == "pull" && pullRef != "" {
+						v.startPullTaskSync(pullRef)
+						return v, v.taskBar.ListenForEvents()
 					}
 				} else {
 					// 选择了 Cancel，取消操作
 					v.showConfirmDialog = false
 					v.confirmAction = ""
 					v.confirmImage = nil
+					v.confirmPullRef = ""
 					v.confirmSelection = 0
 				}
 				return v, nil
@@ -384,6 +489,18 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case "p":
 			// 清理悬垂镜像
 			return v, v.showPruneConfirmDialog()
+		case "P":
+			// 拉取镜像
+			v.pullInput.SetWidth(v.width)
+			v.pullInput.Show()
+			return v, nil
+		case "T":
+			// 切换任务栏展开/收起
+			v.taskBar.Toggle()
+			return v, nil
+		case "t":
+			// 打标签
+			return v, v.showTagInput()
 		}
 	}
 
@@ -479,6 +596,22 @@ func (v *ImageListView) View() string {
 		s += searchLine + searchPrompt + searchInput + "    " + cancelHint + "\n"
 	}
 
+	// 任务进度条（如果有活跃任务）
+	if v.taskBar.HasActiveTasks() {
+		v.taskBar.SetWidth(v.width)
+		s += v.taskBar.View()
+	}
+
+	// 如果显示拉取输入框，叠加在内容上
+	if v.pullInput.IsVisible() {
+		s = v.overlayPullInput(s)
+	}
+
+	// 如果显示打标签输入框，叠加在内容上
+	if v.tagInput.IsVisible() {
+		s = v.overlayTagInput(s)
+	}
+
 	// 如果显示确认对话框，叠加在内容上
 	if v.showConfirmDialog {
 		s = v.overlayDialog(s)
@@ -503,6 +636,10 @@ func (v *ImageListView) SetSize(width, height int) {
 	if v.scrollTable != nil {
 		v.scrollTable.SetSize(width-4, tableHeight)
 	}
+
+	// 更新拉取输入框和任务栏尺寸
+	v.pullInput.SetWidth(width)
+	v.taskBar.SetWidth(width)
 }
 
 // renderStatusBar 渲染顶部状态栏
@@ -945,6 +1082,43 @@ func (v *ImageListView) GetSelectedImage() *docker.Image {
 	return &v.filteredImages[selectedIndex]
 }
 
+// overlayPullInput 将拉取输入框叠加到现有内容上（居中显示）
+func (v *ImageListView) overlayPullInput(baseContent string) string {
+	// 将基础内容按行分割
+	lines := strings.Split(baseContent, "\n")
+
+	// 获取输入框内容
+	inputContent := v.pullInput.View()
+	inputLines := strings.Split(inputContent, "\n")
+	inputHeight := len(inputLines)
+
+	// 计算输入框应该插入的位置（垂直居中）
+	insertLine := 0
+	if len(lines) > inputHeight {
+		insertLine = (len(lines) - inputHeight) / 2
+	}
+
+	// 构建最终输出
+	var result strings.Builder
+
+	for i := 0; i < len(lines); i++ {
+		inputIdx := i - insertLine
+		if inputIdx >= 0 && inputIdx < len(inputLines) {
+			// 在这个位置显示输入框行
+			result.WriteString(inputLines[inputIdx])
+		} else if i < len(lines) {
+			// 显示原始内容
+			result.WriteString(lines[i])
+		}
+
+		if i < len(lines)-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
 // overlayDialog 将对话框叠加到现有内容上（居中显示）
 func (v *ImageListView) overlayDialog(baseContent string) string {
 	// 将基础内容按行分割
@@ -1026,22 +1200,38 @@ func (v *ImageListView) renderConfirmDialogContent() string {
 	var title, warning string
 
 	if v.confirmAction == "remove" && v.confirmImage != nil {
-		// 删除镜像对话框
+		// 普通删除镜像对话框
 		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag
 		if len(imageName) > 35 {
 			imageName = imageName[:32] + "..."
 		}
 
-		title = titleStyle.Render("⚠️  Delete Image: " + imageName)
-		if v.confirmImage.InUse {
-			warning = warningStyle.Render("⚠️  镜像正在被容器使用，将强制删除！")
-		} else {
-			warning = warningStyle.Render("This action cannot be undone!")
+		title = titleStyle.Render("⚠️  删除镜像: " + imageName)
+		warning = warningStyle.Render("此操作不可撤销！")
+	} else if v.confirmAction == "force_remove" && v.confirmImage != nil {
+		// 强制删除镜像对话框（镜像被容器引用）
+		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag
+		if len(imageName) > 35 {
+			imageName = imageName[:32] + "..."
 		}
+
+		title = titleStyle.Render("⚠️  强制删除镜像: " + imageName)
+		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render(
+			"⚠️  该镜像正在被容器使用！\n") +
+			warningStyle.Render("强制删除可能导致相关容器无法正常运行。\n确定要继续吗？")
 	} else if v.confirmAction == "prune" {
 		// 清理悬垂镜像对话框
-		title = titleStyle.Render("⚠️  Prune Dangling Images")
+		title = titleStyle.Render("⚠️  清理悬垂镜像")
 		warning = warningStyle.Render("将删除所有无标签的悬垂镜像，释放磁盘空间")
+	} else if v.confirmAction == "pull" && v.confirmPullRef != "" {
+		// 拉取镜像确认对话框
+		imageName := v.confirmPullRef
+		if len(imageName) > 35 {
+			imageName = imageName[:32] + "..."
+		}
+
+		title = titleStyle.Render("📥  拉取镜像: " + imageName)
+		warning = warningStyle.Render("确认要拉取此镜像吗？")
 	}
 
 	cancelBtn := cancelBtnStyle.Render("< Cancel >")
@@ -1094,6 +1284,14 @@ func (v *ImageListView) showRemoveConfirmDialog() tea.Cmd {
 	return nil
 }
 
+// showForceRemoveConfirmDialog 显示强制删除确认对话框（镜像被容器引用时）
+func (v *ImageListView) showForceRemoveConfirmDialog(image *docker.Image) {
+	v.showConfirmDialog = true
+	v.confirmAction = "force_remove"
+	v.confirmImage = image
+	v.confirmSelection = 0 // 默认选中 Cancel
+}
+
 // showPruneConfirmDialog 显示清理悬垂镜像确认对话框
 func (v *ImageListView) showPruneConfirmDialog() tea.Cmd {
 	// 显示确认对话框
@@ -1106,17 +1304,24 @@ func (v *ImageListView) showPruneConfirmDialog() tea.Cmd {
 }
 
 // removeImage 删除镜像
-func (v *ImageListView) removeImage(image *docker.Image) tea.Cmd {
+func (v *ImageListView) removeImage(image *docker.Image, force bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// 如果镜像正在被使用，使用强制删除
-		force := image.InUse
-
 		// 删除镜像
 		err := v.dockerClient.RemoveImage(ctx, image.ID, force, false)
 		if err != nil {
+			// 检查是否是因为镜像被容器引用
+			errStr := err.Error()
+			if strings.Contains(errStr, "image is being used") || 
+			   strings.Contains(errStr, "image has dependent child images") ||
+			   strings.Contains(errStr, "conflict") {
+				return imageInUseErrorMsg{
+					image: image,
+					err:   err,
+				}
+			}
 			return imageOperationErrorMsg{
 				operation: "删除镜像",
 				image:     image.Repository + ":" + image.Tag,
@@ -1129,6 +1334,12 @@ func (v *ImageListView) removeImage(image *docker.Image) tea.Cmd {
 			image:     image.Repository + ":" + image.Tag,
 		}
 	}
+}
+
+// imageInUseErrorMsg 镜像被容器引用错误消息
+type imageInUseErrorMsg struct {
+	image *docker.Image
+	err   error
 }
 
 // pruneImages 清理悬垂镜像
@@ -1176,3 +1387,132 @@ type imageOperationErrorMsg struct {
 
 // clearSuccessMessageMsg 已在 container_list_view.go 中定义，这里复用
 
+// taskTickMsg 任务状态定时刷新消息
+type taskTickMsg struct{}
+
+// scheduleTaskTick 安排下一次任务状态刷新
+func (v *ImageListView) scheduleTaskTick() tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+		return taskTickMsg{}
+	})
+}
+
+// startPullTask 启动镜像拉取任务
+func (v *ImageListView) startPullTask(imageRef string) tea.Cmd {
+	return func() tea.Msg {
+		// 创建拉取任务
+		pullTask := task.NewPullTask(v.dockerClient, imageRef)
+		
+		// 提交到任务管理器
+		manager := task.GetManager()
+		manager.Submit(pullTask)
+
+		// 显示开始消息
+		v.successMsg = fmt.Sprintf("📥 开始拉取: %s", imageRef)
+		v.successMsgTime = time.Now()
+
+		return nil
+	}
+}
+
+// startPullTaskSync 同步启动镜像拉取任务（不返回 tea.Cmd）
+func (v *ImageListView) startPullTaskSync(imageRef string) {
+	// 创建拉取任务
+	pullTask := task.NewPullTask(v.dockerClient, imageRef)
+	
+	// 提交到任务管理器
+	manager := task.GetManager()
+	manager.Submit(pullTask)
+
+	// 显示开始消息
+	v.successMsg = fmt.Sprintf("📥 开始拉取: %s", imageRef)
+	v.successMsgTime = time.Now()
+}
+
+// showTagInput 显示打标签输入框
+func (v *ImageListView) showTagInput() tea.Cmd {
+	image := v.GetSelectedImage()
+	if image == nil {
+		return func() tea.Msg {
+			return imageOperationErrorMsg{
+				operation: "打标签",
+				image:     "",
+				err:       fmt.Errorf("请先选择一个镜像"),
+			}
+		}
+	}
+
+	// 设置输入框宽度并显示
+	v.tagInput.SetWidth(v.width)
+	v.tagInput.Show(
+		image.Repository+":"+image.Tag, // 源镜像显示名称
+		image.ID,                        // 源镜像 ID
+		image.Repository,                // 源镜像仓库名
+		image.Tag,                       // 源镜像标签
+	)
+
+	return nil
+}
+
+// overlayTagInput 将打标签输入框叠加到现有内容上（居中显示）
+func (v *ImageListView) overlayTagInput(baseContent string) string {
+	// 将基础内容按行分割
+	lines := strings.Split(baseContent, "\n")
+
+	// 获取输入框内容
+	inputContent := v.tagInput.View()
+	inputLines := strings.Split(inputContent, "\n")
+	inputHeight := len(inputLines)
+
+	// 计算输入框应该插入的位置（垂直居中）
+	insertLine := 0
+	if len(lines) > inputHeight {
+		insertLine = (len(lines) - inputHeight) / 2
+	}
+
+	// 构建最终输出
+	var result strings.Builder
+
+	for i := 0; i < len(lines); i++ {
+		inputIdx := i - insertLine
+		if inputIdx >= 0 && inputIdx < len(inputLines) {
+			// 在这个位置显示输入框行
+			result.WriteString(inputLines[inputIdx])
+		} else if i < len(lines) {
+			// 显示原始内容
+			result.WriteString(lines[i])
+		}
+
+		if i < len(lines)-1 {
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
+// tagImage 执行打标签操作
+func (v *ImageListView) tagImage(sourceImageID, repository, tag string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// 构建目标引用
+		targetRef := repository + ":" + tag
+
+		// 调用 Docker 客户端打标签
+		err := v.dockerClient.TagImage(ctx, sourceImageID, repository, tag)
+		if err != nil {
+			return imageOperationErrorMsg{
+				operation: "打标签",
+				image:     targetRef,
+				err:       err,
+			}
+		}
+
+		return imageOperationSuccessMsg{
+			operation: "打标签",
+			image:     targetRef,
+		}
+	}
+}

@@ -53,6 +53,17 @@ type ResourceInfo struct {
 	Hint        string // 不可用时的提示
 }
 
+// 间距常量（终端单位）
+const (
+	// 模块间大间距（行数）
+	spacingModuleLarge = 2
+	// 模块内标题与内容间距（行数）
+	spacingTitleContent = 1
+	// 卡片内边距（字符数）
+	paddingCardHorizontal = 2
+	paddingCardVertical   = 0
+)
+
 // HomeView 首页导航视图
 type HomeView struct {
 	dockerClient docker.Client
@@ -77,78 +88,51 @@ type HomeView struct {
 	lastRefreshTime time.Time
 }
 
-// 首页样式定义
+// 首页样式定义 - 使用自适应颜色
 var (
-	// 标题样式
-	homeTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
+	// 主标题样式
+	homeMainTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("220")).
+				Bold(true)
 
-	// 区域标题样式
+	// 区域标题样式（未选中）
 	homeSectionTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+				Foreground(lipgloss.Color("245"))
 
-	// 运行时卡片样式
-	runtimeCardStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 2).
-		Width(20)
+	// 区域标题样式（选中）
+	homeSectionTitleActiveStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("81")).
+					Bold(true)
 
-	runtimeCardSelectedStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
-		Padding(0, 2).
-		Width(20)
-
-	runtimeCardDisabledStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("238")).
-		Padding(0, 2).
-		Width(20)
-
-	// 资源卡片样式
-	resourceCardStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Width(16)
-
-	resourceCardSelectedStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
-		Padding(0, 1).
-		Width(16)
-
-	resourceCardDisabledStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("238")).
-		Padding(0, 1).
-		Width(16)
+	// 次要文字样式
+	homeSubtextStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("245"))
 
 	// 状态样式
 	homeConnectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
+				Foreground(lipgloss.Color("82"))
 
 	homeDisconnectedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+				Foreground(lipgloss.Color("245"))
 
+	// 数量样式
 	homeCountStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+			Foreground(lipgloss.Color("252"))
 
 	homeActiveCountStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
+				Foreground(lipgloss.Color("82"))
 
+	// 快捷键样式
 	homeKeyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
+			Foreground(lipgloss.Color("81"))
 
+	// 提示样式
 	homeHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+			Foreground(lipgloss.Color("245"))
 
-	// 底部状态栏样式
-	homeFooterStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Padding(0, 1)
+	// 开发中标记样式
+	homeDevTagStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208"))
 )
 
 // NewHomeView 创建首页视图
@@ -228,32 +212,27 @@ func (v *HomeView) Update(msg tea.Msg) (View, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
-			// 切换焦点区域
 			v.focusArea = (v.focusArea + 1) % 2
 			return v, nil
 
 		case "up", "k":
 			if v.focusArea == 1 {
-				// 从资源区切换到运行时区
 				v.focusArea = 0
 			}
 			return v, nil
 
 		case "down", "j":
 			if v.focusArea == 0 {
-				// 从运行时区切换到资源区
 				v.focusArea = 1
 			}
 			return v, nil
 
 		case "left", "h":
 			if v.focusArea == 0 {
-				// 运行时区左移
 				if v.selectedRuntime > 0 {
 					v.selectedRuntime--
 				}
 			} else {
-				// 资源区左移
 				if v.selectedResource > 0 {
 					v.selectedResource--
 				}
@@ -262,12 +241,10 @@ func (v *HomeView) Update(msg tea.Msg) (View, tea.Cmd) {
 
 		case "right", "l":
 			if v.focusArea == 0 {
-				// 运行时区右移
 				if v.selectedRuntime < len(v.runtimes)-1 {
 					v.selectedRuntime++
 				}
 			} else {
-				// 资源区右移
 				if v.selectedResource < len(v.resources)-1 {
 					v.selectedResource++
 				}
@@ -275,12 +252,10 @@ func (v *HomeView) Update(msg tea.Msg) (View, tea.Cmd) {
 			return v, nil
 
 		case "r", "f5":
-			// 刷新状态
 			v.loading = true
 			return v, v.loadStats
 
 		case "1", "2", "3", "4", "5":
-			// 数字键快速选择资源
 			idx := int(msg.String()[0] - '1')
 			if idx >= 0 && idx < len(v.resources) {
 				v.selectedResource = idx
@@ -297,89 +272,192 @@ func (v *HomeView) Update(msg tea.Msg) (View, tea.Cmd) {
 func (v *HomeView) View() string {
 	var content strings.Builder
 
-	// 顶部标题
+	// 顶部状态栏
 	content.WriteString(v.renderHeader())
-	content.WriteString("\n\n")
+	content.WriteString(strings.Repeat("\n", spacingModuleLarge))
 
 	// 运行时区域
 	content.WriteString(v.renderRuntimeSection())
-	content.WriteString("\n\n")
+	content.WriteString(strings.Repeat("\n", spacingModuleLarge))
 
 	// 资源区域
 	content.WriteString(v.renderResourceSection())
-	content.WriteString("\n")
 
 	// 底部填充
 	currentHeight := strings.Count(content.String(), "\n") + 1
-	padding := v.height - currentHeight - 2 // 2 是底部状态栏
+	footerHeight := 3 // 底部栏高度
+	padding := v.height - currentHeight - footerHeight - spacingModuleLarge
 	if padding > 0 {
 		content.WriteString(strings.Repeat("\n", padding))
 	}
 
-	// 底部状态栏
+	// 底部间距
+	content.WriteString(strings.Repeat("\n", spacingModuleLarge))
+
+	// 底部操作栏
 	content.WriteString(v.renderFooter())
 
 	return content.String()
 }
 
-// renderHeader 渲染顶部标题
+// renderHeader 渲染顶部状态栏
 func (v *HomeView) renderHeader() string {
-	title := homeTitleStyle.Render("🐳 DockTUI")
-	version := homeHintStyle.Render("v0.1.0")
-
-	// 加载状态
-	var status string
-	if v.loading {
-		status = homeHintStyle.Render("⏳ 加载中...")
-	} else if !v.lastRefreshTime.IsZero() {
-		status = homeHintStyle.Render(fmt.Sprintf("最后刷新: %s", v.lastRefreshTime.Format("15:04:05")))
+	// 确保宽度有效
+	width := v.width
+	if width < 60 {
+		width = 60
 	}
 
-	header := fmt.Sprintf("  %s %s    %s", title, version, status)
-	return header
+	// 左侧：标题 + 版本
+	leftPart := homeMainTitleStyle.Render("🐳 DockTUI") + " " + homeSubtextStyle.Render("v0.1.0")
+
+	// 右侧：刷新状态 + 刷新提示
+	var rightPart string
+	if v.loading {
+		rightPart = homeSubtextStyle.Render("⏳ 加载中...")
+	} else if !v.lastRefreshTime.IsZero() {
+		refreshTime := homeSubtextStyle.Render(fmt.Sprintf("最后刷新: %s", v.lastRefreshTime.Format("15:04:05")))
+		refreshHint := homeKeyStyle.Render("r") + homeSubtextStyle.Render("=刷新")
+		rightPart = refreshTime + "  " + refreshHint
+	}
+
+	// 计算间距，左右对齐
+	leftWidth := lipgloss.Width(leftPart)
+	rightWidth := lipgloss.Width(rightPart)
+	spacing := width - leftWidth - rightWidth - 4 // 4 是左右边距
+	if spacing < 2 {
+		spacing = 2
+	}
+
+	return "  " + leftPart + strings.Repeat(" ", spacing) + rightPart + "  "
 }
 
 // renderRuntimeSection 渲染运行时区域
 func (v *HomeView) renderRuntimeSection() string {
+	// 确保宽度有效
+	width := v.width
+	if width < 60 {
+		width = 60
+	}
+
 	// 区域标题
-	sectionTitle := homeSectionTitleStyle.Render("  运行时")
+	var sectionTitle string
 	if v.focusArea == 0 {
-		sectionTitle = homeTitleStyle.Render("▶ 运行时")
+		sectionTitle = homeSectionTitleActiveStyle.Render("▶ 🔧 容器运行时")
+	} else {
+		sectionTitle = homeSectionTitleStyle.Render("  🔧 容器运行时")
 	}
 
 	// 渲染运行时卡片
 	var cards []string
 	for i, rt := range v.runtimes {
-		cards = append(cards, v.renderRuntimeCard(rt, i == v.selectedRuntime && v.focusArea == 0))
+		isSelected := i == v.selectedRuntime && v.focusArea == 0
+		cards = append(cards, v.renderRuntimeCard(rt, isSelected))
 	}
 
-	// 水平排列卡片
-	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top, cards...)
+	// 手动拼接卡片（逐行）
+	cardsRow := joinCardsHorizontal(cards, "  ")
 
 	// 居中显示
-	centeredCards := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(cardsRow)
+	cardsWidth := getFirstLineWidth(cardsRow)
+	leftPadding := (width - cardsWidth) / 2
+	if leftPadding < 2 {
+		leftPadding = 2
+	}
+	
+	// 为每行添加左边距
+	lines := strings.Split(cardsRow, "\n")
+	for i, line := range lines {
+		lines[i] = strings.Repeat(" ", leftPadding) + line
+	}
+	centeredCards := strings.Join(lines, "\n")
 
-	return sectionTitle + "\n" + centeredCards
+	return sectionTitle + strings.Repeat("\n", spacingTitleContent) + centeredCards
+}
+
+// joinCardsHorizontal 手动水平拼接多个卡片
+func joinCardsHorizontal(cards []string, separator string) string {
+	if len(cards) == 0 {
+		return ""
+	}
+	if len(cards) == 1 {
+		return cards[0]
+	}
+
+	// 将每个卡片分割成行
+	cardLines := make([][]string, len(cards))
+	maxLines := 0
+	for i, card := range cards {
+		cardLines[i] = strings.Split(card, "\n")
+		if len(cardLines[i]) > maxLines {
+			maxLines = len(cardLines[i])
+		}
+	}
+
+	// 计算每个卡片的宽度（使用第一行）
+	cardWidths := make([]int, len(cards))
+	for i, lines := range cardLines {
+		if len(lines) > 0 {
+			cardWidths[i] = lipgloss.Width(lines[0])
+		}
+	}
+
+	// 逐行拼接
+	var result []string
+	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+		var lineParts []string
+		for cardIdx, lines := range cardLines {
+			var line string
+			if lineIdx < len(lines) {
+				line = lines[lineIdx]
+			}
+			// 填充到卡片宽度
+			lineWidth := lipgloss.Width(line)
+			if lineWidth < cardWidths[cardIdx] {
+				line = line + strings.Repeat(" ", cardWidths[cardIdx]-lineWidth)
+			}
+			lineParts = append(lineParts, line)
+		}
+		result = append(result, strings.Join(lineParts, separator))
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// getFirstLineWidth 获取第一行的宽度
+func getFirstLineWidth(s string) int {
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 {
+		return lipgloss.Width(lines[0])
+	}
+	return 0
 }
 
 // renderRuntimeCard 渲染单个运行时卡片
 func (v *HomeView) renderRuntimeCard(rt RuntimeInfo, selected bool) string {
-	// 选择样式：选中状态优先
-	var style lipgloss.Style
+	// 边框颜色
+	var borderColor lipgloss.Color
 	if selected {
-		style = runtimeCardSelectedStyle
-	} else if !rt.Connected && rt.Type != RuntimeDocker {
-		style = runtimeCardDisabledStyle
+		borderColor = lipgloss.Color("81") // 高亮青色
+	} else if rt.Connected {
+		borderColor = lipgloss.Color("82") // 已连接绿色
 	} else {
-		style = runtimeCardStyle
+		borderColor = lipgloss.Color("238") // 未连接灰色
 	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(paddingCardVertical, paddingCardHorizontal)
 
 	// 标题行
 	var title string
 	if selected {
-		title = homeTitleStyle.Render(fmt.Sprintf("%s %s", rt.Icon, rt.Name))
+		title = homeMainTitleStyle.Render(fmt.Sprintf("%s %s", rt.Icon, rt.Name))
+	} else if rt.Connected {
+		title = homeConnectedStyle.Render(fmt.Sprintf("%s %s", rt.Icon, rt.Name))
 	} else {
-		title = fmt.Sprintf("%s %s", rt.Icon, rt.Name)
+		title = homeSubtextStyle.Render(fmt.Sprintf("%s %s", rt.Icon, rt.Name))
 	}
 
 	// 状态行
@@ -387,7 +465,7 @@ func (v *HomeView) renderRuntimeCard(rt RuntimeInfo, selected bool) string {
 	if rt.Connected {
 		status = homeConnectedStyle.Render("● 已连接")
 		if rt.Version != "" {
-			status += homeHintStyle.Render(" " + rt.Version)
+			status += " " + homeSubtextStyle.Render(rt.Version)
 		}
 	} else if rt.Type == RuntimeDocker {
 		status = homeDisconnectedStyle.Render("○ 未连接")
@@ -396,61 +474,76 @@ func (v *HomeView) renderRuntimeCard(rt RuntimeInfo, selected bool) string {
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, title, status)
-	return style.Render(content)
+	return cardStyle.Render(content)
 }
 
 // renderResourceSection 渲染资源区域
 func (v *HomeView) renderResourceSection() string {
-	// 获取当前运行时名称
 	runtimeName := v.runtimes[v.selectedRuntime].Name
+	runtimeIcon := v.runtimes[v.selectedRuntime].Icon
 
 	// 区域标题
-	sectionTitle := homeSectionTitleStyle.Render(fmt.Sprintf("  %s 资源", runtimeName))
+	var sectionTitle string
 	if v.focusArea == 1 {
-		sectionTitle = homeTitleStyle.Render(fmt.Sprintf("▶ %s 资源", runtimeName))
+		sectionTitle = homeSectionTitleActiveStyle.Render(fmt.Sprintf("▶ %s %s 资源管理", runtimeIcon, runtimeName))
+	} else {
+		sectionTitle = homeSectionTitleStyle.Render(fmt.Sprintf("  %s %s 资源管理", runtimeIcon, runtimeName))
 	}
 
-	// 渲染资源卡片
+	// 渲染所有资源卡片
 	var cards []string
 	for i, res := range v.resources {
-		cards = append(cards, v.renderResourceCard(res, i == v.selectedResource && v.focusArea == 1, i+1))
+		isSelected := i == v.selectedResource && v.focusArea == 1
+		cards = append(cards, v.renderResourceCard(res, isSelected, i+1))
 	}
 
-	// 根据宽度决定布局
-	var cardsRow string
-	if v.width < 90 {
-		// 窄屏：分两行显示
-		row1 := lipgloss.JoinHorizontal(lipgloss.Top, cards[:3]...)
-		row2 := lipgloss.JoinHorizontal(lipgloss.Top, cards[3:]...)
-		cardsRow = lipgloss.JoinVertical(lipgloss.Center, row1, row2)
-	} else {
-		// 宽屏：一行显示
-		cardsRow = lipgloss.JoinHorizontal(lipgloss.Top, cards...)
-	}
+	// 手动拼接卡片（逐行）
+	cardsRow := joinCardsHorizontal(cards, "  ")
 
 	// 居中显示
-	centeredCards := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(cardsRow)
+	width := v.width
+	if width < 60 {
+		width = 60
+	}
+	cardsWidth := getFirstLineWidth(cardsRow)
+	leftPadding := (width - cardsWidth) / 2
+	if leftPadding < 2 {
+		leftPadding = 2
+	}
 
-	return sectionTitle + "\n" + centeredCards
+	// 为每行添加左边距
+	lines := strings.Split(cardsRow, "\n")
+	for i, line := range lines {
+		lines[i] = strings.Repeat(" ", leftPadding) + line
+	}
+	centeredCards := strings.Join(lines, "\n")
+
+	return sectionTitle + strings.Repeat("\n", spacingTitleContent) + centeredCards
 }
 
 // renderResourceCard 渲染单个资源卡片
 func (v *HomeView) renderResourceCard(res ResourceInfo, selected bool, num int) string {
-	// 选择样式
-	// 选择样式：选中状态优先
-	var style lipgloss.Style
+	// 边框颜色
+	var borderColor lipgloss.Color
 	if selected {
-		style = resourceCardSelectedStyle
-	} else if !res.Available {
-		style = resourceCardDisabledStyle
+		borderColor = lipgloss.Color("81") // 高亮青色
+	} else if res.Available {
+		borderColor = lipgloss.Color("240") // 可用灰色
 	} else {
-		style = resourceCardStyle
+		borderColor = lipgloss.Color("238") // 不可用深灰
 	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(paddingCardVertical, paddingCardHorizontal)
 
 	// 标题行（图标 + 名称）
 	var title string
 	if selected {
-		title = homeTitleStyle.Render(fmt.Sprintf("%s %s", res.Icon, res.Name))
+		title = homeMainTitleStyle.Render(fmt.Sprintf("%s %s", res.Icon, res.Name))
+	} else if !res.Available {
+		title = homeSubtextStyle.Render(fmt.Sprintf("%s %s", res.Icon, res.Name))
 	} else {
 		title = fmt.Sprintf("%s %s", res.Icon, res.Name)
 	}
@@ -458,81 +551,102 @@ func (v *HomeView) renderResourceCard(res ResourceInfo, selected bool, num int) 
 	// 统计行
 	var stats string
 	if !res.Available {
-		stats = homeHintStyle.Render(res.Hint)
+		stats = homeDevTagStyle.Render("🚧 " + res.Hint)
 	} else if v.loading {
-		stats = homeHintStyle.Render("...")
+		stats = homeSubtextStyle.Render("...")
 	} else {
 		countStr := homeCountStyle.Render(fmt.Sprintf("%d", res.Count))
-		if res.ActiveCount > 0 {
-			activeStr := homeActiveCountStyle.Render(fmt.Sprintf("%d", res.ActiveCount))
-			switch res.Type {
-			case ResourceContainers:
+		switch res.Type {
+		case ResourceContainers:
+			if res.ActiveCount > 0 {
+				activeStr := homeActiveCountStyle.Render(fmt.Sprintf("%d", res.ActiveCount))
 				stats = fmt.Sprintf("%s (%s 运行)", countStr, activeStr)
-			case ResourceImages:
-				if res.ActiveCount > 0 {
-					stats = fmt.Sprintf("%s (%s 悬垂)", countStr, homeHintStyle.Render(fmt.Sprintf("%d", res.ActiveCount)))
-				} else {
-					stats = countStr
-				}
-			case ResourceCompose:
-				stats = fmt.Sprintf("%s (%s 运行)", countStr, activeStr)
-			default:
+			} else {
 				stats = countStr
 			}
-		} else {
+		case ResourceImages:
+			if res.ActiveCount > 0 {
+				stats = fmt.Sprintf("%s (%s 悬垂)", countStr, homeSubtextStyle.Render(fmt.Sprintf("%d", res.ActiveCount)))
+			} else {
+				stats = countStr
+			}
+		case ResourceCompose:
+			if res.ActiveCount > 0 {
+				activeStr := homeActiveCountStyle.Render(fmt.Sprintf("%d", res.ActiveCount))
+				stats = fmt.Sprintf("%s (%s 运行)", countStr, activeStr)
+			} else {
+				stats = countStr
+			}
+		default:
 			stats = countStr
 		}
 	}
 
-	// 快捷键提示
-	keyHint := homeKeyStyle.Render(res.Key) + homeHintStyle.Render(fmt.Sprintf(" 或 %d", num))
+	// 快捷键提示（与文字保持间距）
+	keyHint := homeKeyStyle.Render(res.Key) + " " + homeSubtextStyle.Render(fmt.Sprintf("或 %d", num))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, title, stats, keyHint)
-	return style.Render(content)
+	return cardStyle.Render(content)
 }
 
-// renderFooter 渲染底部状态栏
+// renderFooter 渲染底部操作栏
 func (v *HomeView) renderFooter() string {
+	// 确保宽度有效
+	width := v.width
+	if width < 60 {
+		width = 60
+	}
+
+	// 左侧：快捷键提示
 	keys := []string{
-		homeKeyStyle.Render("↑/↓") + "=切换区域",
-		homeKeyStyle.Render("←/→") + "=选择",
-		homeKeyStyle.Render("Enter") + "=进入",
-		homeKeyStyle.Render("r") + "=刷新",
-		homeKeyStyle.Render("?") + "=帮助",
-		homeKeyStyle.Render("q") + "=退出",
+		homeKeyStyle.Render("↑↓") + " 切换区域",
+		homeKeyStyle.Render("←→") + " 选择",
+		homeKeyStyle.Render("Enter") + " 进入",
+		homeKeyStyle.Render("?") + " 帮助",
+		homeKeyStyle.Render("q") + " 退出",
+	}
+	leftPart := strings.Join(keys, "  ")
+
+	// 右侧：当前选中提示
+	var rightPart string
+	if v.focusArea == 1 && v.selectedResource < len(v.resources) {
+		res := v.resources[v.selectedResource]
+		if res.Available {
+			rightPart = homeSubtextStyle.Render("当前: ") +
+				homeMainTitleStyle.Render(res.Name) + " " +
+				homeKeyStyle.Render(fmt.Sprintf("[%s/%d]", res.Key, v.selectedResource+1))
+		} else {
+			rightPart = homeSubtextStyle.Render("当前: ") +
+				homeDevTagStyle.Render(res.Name+" ("+res.Hint+")")
+		}
+	} else if v.focusArea == 0 && v.selectedRuntime < len(v.runtimes) {
+		rt := v.runtimes[v.selectedRuntime]
+		rightPart = homeSubtextStyle.Render("当前: ") + homeMainTitleStyle.Render(rt.Name)
 	}
 
-	footerContent := " " + strings.Join(keys, "  ")
-
-	availableWidth := v.width
-	if availableWidth < 60 {
-		availableWidth = 60
+	// 计算间距
+	leftWidth := lipgloss.Width(leftPart)
+	rightWidth := lipgloss.Width(rightPart)
+	spacing := width - leftWidth - rightWidth - 4
+	if spacing < 2 {
+		spacing = 2
 	}
 
-	return homeFooterStyle.Width(availableWidth).Render(footerContent)
+	// 分隔线宽度
+	separatorWidth := width - 4
+	if separatorWidth < 10 {
+		separatorWidth = 10
+	}
+	separator := homeSubtextStyle.Render(strings.Repeat("─", separatorWidth))
+
+	return "  " + separator + "\n" +
+		"  " + leftPart + strings.Repeat(" ", spacing) + rightPart + "  "
 }
 
 // SetSize 设置视图尺寸
 func (v *HomeView) SetSize(width, height int) {
 	v.width = width
 	v.height = height
-
-	// 根据宽度调整卡片宽度
-	if width < 80 {
-		runtimeCardStyle = runtimeCardStyle.Width(18)
-		runtimeCardSelectedStyle = runtimeCardSelectedStyle.Width(18)
-		runtimeCardDisabledStyle = runtimeCardDisabledStyle.Width(18)
-		resourceCardStyle = resourceCardStyle.Width(14)
-		resourceCardSelectedStyle = resourceCardSelectedStyle.Width(14)
-		resourceCardDisabledStyle = resourceCardDisabledStyle.Width(14)
-	} else {
-		runtimeCardStyle = runtimeCardStyle.Width(22)
-		runtimeCardSelectedStyle = runtimeCardSelectedStyle.Width(22)
-		runtimeCardDisabledStyle = runtimeCardDisabledStyle.Width(22)
-		resourceCardStyle = resourceCardStyle.Width(16)
-		resourceCardSelectedStyle = resourceCardSelectedStyle.Width(16)
-		resourceCardDisabledStyle = resourceCardDisabledStyle.Width(16)
-	}
 }
 
 // GetSelectedCard 获取当前选中的资源索引（兼容旧接口）
@@ -612,7 +726,6 @@ func (v *HomeView) loadStats() tea.Msg {
 	}
 
 	// TODO: 获取 Compose 项目统计
-	// 暂时设置为不可用，后续实现
 	result.composeAvailable = false
 	result.composeCount = 0
 	result.composeRunning = 0

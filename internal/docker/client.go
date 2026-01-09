@@ -584,23 +584,6 @@ func (c *LocalClient) ListImages(ctx context.Context, showAll bool) ([]Image, er
 			shortID = shortID[:12]
 		}
 
-		// 仓库名和标签
-		repository := "<none>"
-		tag := "<none>"
-		if len(img.RepoTags) > 0 {
-			// 取第一个标签
-			parts := strings.Split(img.RepoTags[0], ":")
-			if len(parts) == 2 {
-				repository = parts[0]
-				tag = parts[1]
-			} else {
-				repository = img.RepoTags[0]
-			}
-		}
-
-		// 判断是否为悬垂镜像
-		dangling := repository == "<none>" && tag == "<none>"
-
 		// 判断是否被容器使用
 		containerIDs := imageToContainers[img.ID]
 		inUse := len(containerIDs) > 0
@@ -611,19 +594,52 @@ func (c *LocalClient) ListImages(ctx context.Context, showAll bool) ([]Image, er
 			digest = img.RepoDigests[0]
 		}
 
-		result = append(result, Image{
-			ID:         img.ID,
-			ShortID:    shortID,
-			Repository: repository,
-			Tag:        tag,
-			Size:       img.Size,
-			Created:    time.Unix(img.Created, 0),
-			Digest:     digest,
-			Labels:     img.Labels,
-			InUse:      inUse,
-			Dangling:   dangling,
-			Containers: containerIDs,
-		})
+		// 如果有多个标签，为每个标签创建一个列表项
+		if len(img.RepoTags) > 0 {
+			for _, repoTag := range img.RepoTags {
+				repository := "<none>"
+				tag := "<none>"
+				parts := strings.Split(repoTag, ":")
+				if len(parts) == 2 {
+					repository = parts[0]
+					tag = parts[1]
+				} else {
+					repository = repoTag
+				}
+
+				// 判断是否为悬垂镜像
+				dangling := repository == "<none>" && tag == "<none>"
+
+				result = append(result, Image{
+					ID:         img.ID,
+					ShortID:    shortID,
+					Repository: repository,
+					Tag:        tag,
+					Size:       img.Size,
+					Created:    time.Unix(img.Created, 0),
+					Digest:     digest,
+					Labels:     img.Labels,
+					InUse:      inUse,
+					Dangling:   dangling,
+					Containers: containerIDs,
+				})
+			}
+		} else {
+			// 没有标签的镜像（悬垂镜像）
+			result = append(result, Image{
+				ID:         img.ID,
+				ShortID:    shortID,
+				Repository: "<none>",
+				Tag:        "<none>",
+				Size:       img.Size,
+				Created:    time.Unix(img.Created, 0),
+				Digest:     digest,
+				Labels:     img.Labels,
+				InUse:      inUse,
+				Dangling:   true,
+				Containers: containerIDs,
+			})
+		}
 	}
 
 	return result, nil
