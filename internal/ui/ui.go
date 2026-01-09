@@ -67,6 +67,10 @@ const (
 	ViewImageList
 	// ViewImageDetails 镜像详情视图
 	ViewImageDetails
+	// ViewNetworkList 网络列表视图
+	ViewNetworkList
+	// ViewNetworkDetail 网络详情视图
+	ViewNetworkDetail
 )
 
 // View 接口定义了所有视图必须实现的方法
@@ -102,6 +106,8 @@ type Model struct {
 	composeListView     *ComposeListView  // Compose 项目列表视图
 	imageListView       *ImageListView    // 镜像列表视图
 	imageDetailsView    *ImageDetailsView // 镜像详情视图
+	networkListView     *NetworkListView  // 网络列表视图
+	networkDetailView   *NetworkDetailView // 网络详情视图
 	shellSelector       *ShellSelector    // Shell 选择器
 	
 	// 全局状态字段
@@ -131,6 +137,7 @@ func NewModel(dockerClient docker.Client) Model {
 	logsView := NewLogsView(dockerClient)
 	helpView := NewHelpView(dockerClient)
 	imageListView := NewImageListView(dockerClient)
+	networkListView := NewNetworkListView(dockerClient)
 	
 	// 初始化 Compose 客户端和视图
 	var composeListView *ComposeListView
@@ -153,6 +160,7 @@ func NewModel(dockerClient docker.Client) Model {
 		helpView:            helpView,
 		composeListView:     composeListView,
 		imageListView:       imageListView,
+		networkListView:     networkListView,
 		shellSelector:       shellSelector,
 		ready:               false,
 		dockerConnected:     true, // 默认假设已连接
@@ -351,6 +359,10 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case GoBackMsg:
+		// 视图请求返回上一级
+		return m.goBack()
+	
 	case execShellMsg:
 		// 执行 shell 命令
 		// 使用 tea.Exec 来暂时释放终端控制
@@ -407,6 +419,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.imageListView != nil {
 			m.imageListView.SetSize(msg.Width, msg.Height)
+		}
+		if m.networkListView != nil {
+			m.networkListView.SetSize(msg.Width, msg.Height)
+		}
+		if m.networkDetailView != nil {
+			m.networkDetailView.SetSize(msg.Width, msg.Height)
 		}
 		if m.shellSelector != nil {
 			m.shellSelector.SetSize(msg.Width, msg.Height)
@@ -482,6 +500,13 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	
+	// 如果网络列表视图的错误弹窗或确认对话框可见，不处理任何全局快捷键
+	if m.currentView == ViewNetworkList && m.networkListView != nil {
+		if m.networkListView.HasError() || m.networkListView.showConfirmDialog || m.networkListView.showFilterMenu || m.networkListView.IsShowingCreateView() {
+			return m, nil
+		}
+	}
+	
 	// 首先处理无条件全局快捷键（这些键在任何视图都优先处理）
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -495,130 +520,10 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewHelp
 		}
 		return m, nil
-	
-	case "c":
-		// 全局快捷键：直达容器列表
-		// 排除：首页（有自己的处理）、容器列表（已经在）、搜索模式、Shell选择器
-		if m.showShellSelector {
-			return m, nil
-		}
-		if m.currentView == ViewWelcome {
-			// 首页有自己的处理逻辑
-			break
-		}
-		if m.currentView == ViewContainerList {
-			// 已经在容器列表，检查是否在搜索模式
-			if listView, ok := m.containerListView.(*ContainerListView); ok {
-				if listView.IsSearching() {
-					return m, nil // 让视图自己处理
-				}
-			}
-			return m, nil // 已经在容器列表
-		}
-		// 从其他页面直达容器列表
-		return m.enterContainerList()
-	
-	case "i":
-		// 全局快捷键：直达镜像列表
-		// 排除：首页、镜像列表（已经在）、搜索模式、Shell选择器
-		if m.showShellSelector {
-			return m, nil
-		}
-		if m.currentView == ViewWelcome {
-			// 首页不处理，让用户通过导航进入
-			break
-		}
-		if m.currentView == ViewImageList {
-			// 已经在镜像列表，检查是否在搜索模式
-			if m.imageListView != nil && m.imageListView.isSearching {
-				return m, nil // 让视图自己处理
-			}
-			return m, nil // 已经在镜像列表
-		}
-		// 从其他页面直达镜像列表
-		return m.enterImageList()
 	}
 	
-	// ESC 键 - 全局返回上一级（固定命令）
-	if msg.String() == "esc" {
-		// 特殊情况：如果有弹窗或输入框显示，让视图自己处理
-		if m.currentView == ViewImageList && m.imageListView != nil {
-			// 检查拉取输入框
-			if m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible() {
-				return m, nil // 让视图自己处理
-			}
-			// 检查打标签输入框
-			if m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible() {
-				return m, nil // 让视图自己处理
-			}
-			// 检查确认对话框
-			if m.imageListView.showConfirmDialog {
-				return m, nil // 让视图自己处理
-			}
-			// 检查错误弹窗
-			if m.imageListView.HasError() {
-				return m, nil // 让视图自己处理
-			}
-			// 检查搜索模式
-			if m.imageListView.isSearching {
-				return m, nil // 让视图自己处理
-			}
-		}
-		
-		// 特殊情况：如果在容器列表有弹窗或搜索模式
-		if m.currentView == ViewContainerList {
-			if listView, ok := m.containerListView.(*ContainerListView); ok {
-				if listView.IsSearching() || listView.showConfirmDialog || listView.IsEditViewVisible() || listView.HasError() {
-					return m, nil // 让视图自己处理
-				}
-			}
-		}
-		
-		// 已经在首页，不处理
-		if m.currentView == ViewWelcome {
-			return m, nil
-		}
-		
-		// 根据当前视图决定返回到哪里（层级导航）
-		// 首页 -> 容器列表 -> 容器详情 -> 日志
-		//      -> Compose列表 -> ...
-		//                  -> 帮助
-		switch m.currentView {
-		case ViewContainerList:
-			// 容器列表返回首页
-			m.currentView = ViewWelcome
-		case ViewContainerDetail:
-			// 容器详情返回容器列表
-			m.currentView = ViewContainerList
-		case ViewLogs:
-			// 日志返回到之前的视图（可能是列表或详情）
-			if m.previousView == ViewContainerDetail || m.previousView == ViewContainerList {
-				m.currentView = m.previousView
-			} else {
-				m.currentView = ViewContainerList
-			}
-		case ViewHelp:
-			// 帮助返回到之前的视图
-			m.currentView = m.previousView
-		case ViewComposeList:
-			// Compose 列表返回首页
-			m.currentView = ViewWelcome
-		case ViewImageList:
-			// 镜像列表返回首页
-			m.currentView = ViewWelcome
-		case ViewImageDetails:
-			// 镜像详情返回镜像列表
-			m.currentView = ViewImageList
-		default:
-			m.currentView = ViewWelcome
-		}
-		
-		// 清除所有临时消息
-		m.infoMsg = ""
-		m.successMsg = ""
-		m.warningMsg = ""
-		return m, nil
-	}
+	// ESC 键 - 让视图自己处理，视图会发送 GoBackMsg 来请求返回
+	// 不在全局处理 ESC，避免复杂的状态检查
 	
 	// 根据当前视图处理不同的快捷键
 	switch m.currentView {
@@ -636,6 +541,8 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleComposeListKeys(msg)
 	case ViewImageList:
 		return m.handleImageListKeys(msg)
+	case ViewNetworkList:
+		return m.handleNetworkListKeys(msg)
 	}
 	
 	return m, nil
@@ -681,7 +588,7 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case ResourceCompose:
 				return m.enterComposeList()
 			case ResourceNetworks:
-				return m, m.SetTemporaryMessage(MsgInfo, "🌐 网络管理功能开发中...", 3)
+				return m.enterNetworkList()
 			case ResourceVolumes:
 				return m, m.SetTemporaryMessage(MsgInfo, "💾 卷管理功能开发中...", 3)
 			}
@@ -713,8 +620,8 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterImageList()
 	
 	case "n":
-		// 快捷键进入网络管理（开发中）
-		return m, m.SetTemporaryMessage(MsgInfo, "🌐 网络管理功能开发中...", 3)
+		// 快捷键进入网络管理
+		return m.enterNetworkList()
 	
 	case "v":
 		// 快捷键进入卷管理（开发中）
@@ -772,6 +679,64 @@ func (m Model) enterImageList() (tea.Model, tea.Cmd) {
 	return m, initCmd
 }
 
+// enterNetworkList 进入网络列表视图
+func (m Model) enterNetworkList() (tea.Model, tea.Cmd) {
+	if m.networkListView == nil {
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 网络列表视图未初始化", 3)
+	}
+	
+	m.previousView = m.currentView
+	m.currentView = ViewNetworkList
+	
+	// 触发网络列表视图的初始化，加载数据
+	initCmd := m.networkListView.Init()
+	
+	return m, initCmd
+}
+
+// goBack 返回上一级视图
+func (m Model) goBack() (tea.Model, tea.Cmd) {
+	// 已经在首页，不处理
+	if m.currentView == ViewWelcome {
+		return m, nil
+	}
+	
+	// 根据当前视图决定返回到哪里（层级导航）
+	switch m.currentView {
+	case ViewContainerList:
+		m.currentView = ViewWelcome
+	case ViewContainerDetail:
+		m.currentView = ViewContainerList
+	case ViewLogs:
+		if m.previousView == ViewContainerDetail || m.previousView == ViewContainerList {
+			m.currentView = m.previousView
+		} else {
+			m.currentView = ViewContainerList
+		}
+	case ViewHelp:
+		m.currentView = m.previousView
+	case ViewComposeList:
+		m.currentView = ViewWelcome
+	case ViewImageList:
+		m.currentView = ViewWelcome
+	case ViewImageDetails:
+		m.currentView = ViewImageList
+	case ViewNetworkList:
+		m.currentView = ViewWelcome
+	case ViewNetworkDetail:
+		m.currentView = ViewNetworkList
+	default:
+		m.currentView = ViewWelcome
+	}
+	
+	// 清除所有临时消息
+	m.infoMsg = ""
+	m.successMsg = ""
+	m.warningMsg = ""
+	
+	return m, nil
+}
+
 // handleContainerListKeys 处理容器列表视图的快捷键
 func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 如果处于搜索模式、显示确认对话框、编辑视图或错误弹窗，让视图自己处理
@@ -782,19 +747,6 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	
 	switch msg.String() {
-	case "i":
-		// 切换到镜像列表视图
-		m.previousView = m.currentView
-		m.currentView = ViewImageList
-		
-		// 初始化镜像列表视图
-		var initCmd tea.Cmd
-		if m.imageListView != nil {
-			initCmd = m.imageListView.Init()
-		}
-		
-		return m, initCmd
-		
 	case "enter":
 		// 进入容器详情视图（L3.2）
 		// 获取当前选中的容器
@@ -1025,19 +977,6 @@ func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	
 	switch msg.String() {
-	case "c":
-		// 切换回容器列表视图
-		m.previousView = m.currentView
-		m.currentView = ViewContainerList
-		
-		// 初始化容器列表视图
-		var initCmd tea.Cmd
-		if m.containerListView != nil {
-			initCmd = m.containerListView.Init()
-		}
-		
-		return m, initCmd
-		
 	case "enter":
 		// 查看镜像详情
 		if m.imageListView != nil {
@@ -1054,6 +993,40 @@ func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	
+	// 其他按键不处理，返回 nil 让消息传递给视图
+	return m, nil
+}
+
+// handleNetworkListKeys 处理网络列表视图的快捷键
+func (m Model) handleNetworkListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// 如果网络列表视图正在显示创建视图、筛选菜单、对话框或错误弹窗，不拦截任何按键
+	if m.networkListView != nil {
+		if m.networkListView.IsShowingCreateView() ||
+			m.networkListView.showFilterMenu ||
+			m.networkListView.showConfirmDialog ||
+			m.networkListView.HasError() ||
+			m.networkListView.isSearching {
+			return m, nil
+		}
+	}
+
+	switch msg.String() {
+	case "enter":
+		// 查看网络详情
+		if m.networkListView != nil {
+			network := m.networkListView.GetSelectedNetwork()
+			if network != nil {
+				// 创建网络详情视图
+				m.networkDetailView = NewNetworkDetailView(m.dockerClient, network)
+				m.networkDetailView.SetSize(m.width, m.height)
+				m.previousView = m.currentView
+				m.currentView = ViewNetworkDetail
+				return m, m.networkDetailView.Init()
+			}
+		}
+		return m, nil
+	}
+
 	// 其他按键不处理，返回 nil 让消息传递给视图
 	return m, nil
 }
@@ -1172,12 +1145,24 @@ func (m Model) View() string {
 		} else {
 			content = "🖼️ 镜像详情视图未初始化"
 		}
+	case ViewNetworkList:
+		if m.networkListView != nil {
+			content = m.networkListView.View()
+		} else {
+			content = "🌐 网络列表视图未初始化"
+		}
+	case ViewNetworkDetail:
+		if m.networkDetailView != nil {
+			content = m.networkDetailView.View()
+		} else {
+			content = "🌐 网络详情视图未初始化"
+		}
 	default:
 		content = "未知视图"
 	}
 	
-	// 添加分级消息显示（非容器列表、Compose 列表和镜像列表视图）
-	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewImageList {
+	// 添加分级消息显示（非容器列表、Compose 列表、镜像列表和网络列表视图）
+	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewImageList && m.currentView != ViewNetworkList {
 		if m.errorMsg != "" && m.dockerConnected {
 			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true)
 			content = "\n" + errorStyle.Render("❌ 致命错误: "+m.errorMsg) + "\n" + content
@@ -1253,6 +1238,22 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			updatedView, cmd = m.imageDetailsView.Update(msg)
 			if v, ok := updatedView.(*ImageDetailsView); ok {
 				m.imageDetailsView = v
+			}
+		}
+	case ViewNetworkList:
+		if m.networkListView != nil {
+			var updatedView View
+			updatedView, cmd = m.networkListView.Update(msg)
+			if v, ok := updatedView.(*NetworkListView); ok {
+				m.networkListView = v
+			}
+		}
+	case ViewNetworkDetail:
+		if m.networkDetailView != nil {
+			var updatedView View
+			updatedView, cmd = m.networkDetailView.Update(msg)
+			if v, ok := updatedView.(*NetworkDetailView); ok {
+				m.networkDetailView = v
 			}
 		}
 	}

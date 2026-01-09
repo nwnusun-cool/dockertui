@@ -162,7 +162,7 @@ func (v *HomeView) getDockerResources() []ResourceInfo {
 	return []ResourceInfo{
 		{Type: ResourceContainers, Name: "容器", Icon: "📦", Key: "c", Available: true},
 		{Type: ResourceImages, Name: "镜像", Icon: "🖼️", Key: "i", Available: true},
-		{Type: ResourceNetworks, Name: "网络", Icon: "🌐", Key: "n", Available: false, Hint: "开发中"},
+		{Type: ResourceNetworks, Name: "网络", Icon: "🌐", Key: "n", Available: true},
 		{Type: ResourceVolumes, Name: "卷", Icon: "💾", Key: "v", Available: false, Hint: "开发中"},
 		{Type: ResourceCompose, Name: "Compose", Icon: "🧩", Key: "o", Available: true},
 	}

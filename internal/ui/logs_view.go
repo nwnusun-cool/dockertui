@@ -136,6 +136,9 @@ func (v *LogsView) Update(msg tea.Msg) (View, tea.Cmd) {
 		
 	case tea.KeyMsg:
 		switch {
+		case msg.String() == "esc":
+			// ESC 返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
 		case key.Matches(msg, v.keys.ToggleFollow):
 			return v.toggleFollowMode()
 		case key.Matches(msg, v.keys.ToggleWrap):

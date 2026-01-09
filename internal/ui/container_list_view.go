@@ -111,6 +111,9 @@ type ContainerListView struct {
 	searchQuery   string // 搜索关键字
 	isSearching   bool   // 是否处于搜索模式
 	
+	// 筛选状态
+	filterType    string // "all", "running", "exited", "paused"
+	
 	// 刷新状态
 	lastRefreshTime   time.Time // 上次刷新时间
 	
@@ -128,6 +131,9 @@ type ContainerListView struct {
 	
 	// 错误弹窗
 	errorDialog *ErrorDialog // 错误弹窗组件
+	
+	// JSON 查看器
+	jsonViewer *JSONViewer // JSON 查看器
 	
 	// 快捷键管理（R3）
 	keys KeyMap
@@ -185,8 +191,10 @@ func NewContainerListView(dockerClient docker.Client) *ContainerListView {
 		keys:         DefaultKeyMap(),
 		searchQuery:  "",
 		isSearching:  false,
+		filterType:   "all",
 		editView:     NewContainerEditView(),
 		errorDialog:  NewErrorDialog(),
+		jsonViewer:   NewJSONViewer(),
 	}
 }
 
@@ -202,6 +210,15 @@ func (v *ContainerListView) Init() tea.Cmd {
 
 // Update 处理消息并更新视图状态
 func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
+	// 如果显示 JSON 查看器，优先处理
+	if v.jsonViewer != nil && v.jsonViewer.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if v.jsonViewer.Update(keyMsg) {
+				return v, nil
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case containersLoadedMsg:
 		// 容器列表加载完成
@@ -285,6 +302,20 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		}
 		return v, nil
 	
+	case containerInspectMsg:
+		// 显示 JSON 查看器
+		if v.jsonViewer != nil {
+			v.jsonViewer.SetSize(v.width, v.height)
+			v.jsonViewer.Show("Container Inspect: "+msg.containerName, msg.jsonContent)
+		}
+		return v, nil
+
+	case containerInspectErrorMsg:
+		if v.errorDialog != nil {
+			v.errorDialog.ShowError(fmt.Sprintf("获取容器信息失败: %v", msg.err))
+		}
+		return v, nil
+
 	case containerEditReadyMsg:
 		// 容器详情获取成功，显示编辑视图
 		if v.editView != nil {
@@ -364,7 +395,7 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			return v, nil
 		}
 		
-		// 优先处理 ESC 键（清除搜索或返回）
+		// 优先处理 ESC 键（清除搜索/筛选或返回）
 		if msg.String() == "esc" {
 			if v.isSearching {
 				// 如果在搜索模式，退出搜索
@@ -374,8 +405,22 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 				v.updateColumnWidths()
 				return v, nil
 			}
-			// 否则，ESC 由全局处理（返回上一级）
-			// 不在这里处理，让它传递到 ui.go 的全局快捷键
+			// 如果有搜索词，先清除搜索
+			if v.searchQuery != "" {
+				v.searchQuery = ""
+				v.applyFilters()
+				v.updateColumnWidths()
+				return v, nil
+			}
+			// 如果有筛选条件，先清除筛选
+			if v.filterType != "all" {
+				v.filterType = "all"
+				v.applyFilters()
+				v.updateColumnWidths()
+				return v, nil
+			}
+			// 没有搜索和筛选条件，发送 GoBackMsg 请求返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
 		}
 		
 		// 如果处于搜索模式，处理搜索输入
@@ -411,6 +456,23 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			v.loading = true
 			v.errorMsg = "" // 清除错误信息
 			return v, v.loadContainers
+		case msg.String() == "f":
+			// 切换筛选状态：all -> running -> exited -> paused -> all
+			switch v.filterType {
+			case "all":
+				v.filterType = "running"
+			case "running":
+				v.filterType = "exited"
+			case "exited":
+				v.filterType = "paused"
+			case "paused":
+				v.filterType = "all"
+			default:
+				v.filterType = "all"
+			}
+			v.applyFilters()
+			v.updateColumnWidths()
+			return v, nil
 		case msg.String() == "/":
 			// 进入搜索模式（L4.2）
 			v.isSearching = true
@@ -474,6 +536,9 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case msg.String() == "e":
 			// 编辑容器配置（Edit）
 			return v, v.showEditView()
+		case msg.String() == "i":
+			// 检查容器（显示 JSON）
+			return v, v.inspectContainer()
 		default:
 			// 其他按键交给 table 处理
 			v.tableModel, _ = v.tableModel.Update(msg)
@@ -486,6 +551,11 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 
 // View 渲染容器列表视图
 func (v *ContainerListView) View() string {
+	// 如果显示 JSON 查看器
+	if v.jsonViewer != nil && v.jsonViewer.IsVisible() {
+		return v.jsonViewer.View()
+	}
+
 	var s string
 	
 	// 顶部状态栏和操作提示
@@ -672,6 +742,12 @@ func (v *ContainerListView) View() string {
 		}
 		
 		s += searchLine + searchPrompt + searchInput + padding + cancelHint + "\n"
+	}
+	
+	// 底部左下角筛选状态提示（非搜索模式时显示）
+	if !v.isSearching && v.filterType != "all" {
+		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + searchHintStyle.Render("按 ESC 清除筛选，按 f 切换") + "\n"
 	}
 	
 	// 如果显示确认对话框，叠加在内容上
@@ -876,8 +952,8 @@ func (v *ContainerListView) renderStatusBar() string {
 	var lines []string
 	
 	// 第一行：Docker 状态 + 基本操作
-	row1Label := labelStyle.Render("Docker: Connected")
-	row1Keys := makeItem("<a>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
+	row1Label := labelStyle.Render("📦 Containers")
+	row1Keys := makeItem("<f>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
 	lines = append(lines, "  "+row1Label+row1Keys)
 	
 	// 第二行：容器操作
@@ -887,25 +963,19 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<e>", "Edit") + makeItem("<s>", "Shell") + makeItem("<l>", "Logs")
+	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<e>", "Edit") + makeItem("<i>", "Inspect") + makeItem("<l>", "Logs")
 	lines = append(lines, "  "+row3Label+row3Keys)
 	
-	// 第四行：查看操作
-	row4Label := labelStyle.Render("View:")
-	row4Keys := makeItem("<Enter>", "Details") + makeItem("<i>", "Images") + makeItem("<b>", "Back") + makeItem("<q>", "Quit")
-	lines = append(lines, "  "+row4Label+row4Keys)
-	
-	// 第五行：版本 + 刷新时间 + vim 提示
-	versionInfo := "v0.1.0"
+	// 第四行：刷新时间 + vim 提示
 	refreshInfo := "-"
 	if !v.lastRefreshTime.IsZero() {
 		refreshInfo = formatDuration(time.Since(v.lastRefreshTime)) + " ago"
 	}
 	
-	row5Label := labelStyle.Render("Version: " + versionInfo)
-	row5Info := hintStyle.Render("Last Refresh: "+refreshInfo) + "    " + 
-		hintStyle.Render("(vim): j/k=上下  h/l=左右滚动  Enter=选择  Esc=返回  q=退出")
-	lines = append(lines, "  "+row5Label+row5Info)
+	row4Label := labelStyle.Render("Last Refresh:")
+	row4Info := hintStyle.Render(refreshInfo) + "    " + 
+		hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
+	lines = append(lines, "  "+row4Label+row4Info)
 	
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
@@ -1248,6 +1318,9 @@ func (v *ContainerListView) updateColumnWidths() {
 				}
 			}
 			v.scrollTable.SetRows(rows)
+		} else {
+			// 清空表格数据
+			v.scrollTable.SetRows([]TableRow{})
 		}
 	}
 	
@@ -1255,6 +1328,8 @@ func (v *ContainerListView) updateColumnWidths() {
 	if len(v.filteredContainers) > 0 {
 		rows := v.containersToRows(v.filteredContainers)
 		v.tableModel.SetRows(rows)
+	} else {
+		v.tableModel.SetRows([]table.Row{})
 	}
 }
 
@@ -1281,11 +1356,27 @@ func (v *ContainerListView) IsSearching() bool {
 	return v.isSearching
 }
 
-// applyFilters 应用搜索过滤（L4）
+// applyFilters 应用搜索和状态过滤
 func (v *ContainerListView) applyFilters() {
 	v.filteredContainers = make([]docker.Container, 0)
 	
 	for _, container := range v.containers {
+		// 应用状态过滤
+		switch v.filterType {
+		case "running":
+			if container.State != "running" {
+				continue
+			}
+		case "exited":
+			if container.State != "exited" {
+				continue
+			}
+		case "paused":
+			if container.State != "paused" {
+				continue
+			}
+		}
+		
 		// 应用搜索过滤
 		if v.searchQuery != "" {
 			// 搜索容器名称、镜像名称、ID
@@ -1341,6 +1432,17 @@ type containerOperationWarningMsg struct {
 
 // clearSuccessMessageMsg 清除成功消息
 type clearSuccessMessageMsg struct{}
+
+// containerInspectMsg 容器检查结果消息
+type containerInspectMsg struct {
+	containerName string
+	jsonContent   string
+}
+
+// containerInspectErrorMsg 容器检查错误消息
+type containerInspectErrorMsg struct {
+	err error
+}
 
 // loadContainers 加载容器列表（返回 tea.Cmd）
 func (v *ContainerListView) loadContainers() tea.Msg {
@@ -1648,6 +1750,32 @@ func (v *ContainerListView) showEditView() tea.Cmd {
 		return containerEditReadyMsg{
 			container: container,
 			details:   details,
+		}
+	}
+}
+
+// inspectContainer 获取容器的原始 JSON
+func (v *ContainerListView) inspectContainer() tea.Cmd {
+	container := v.GetSelectedContainer()
+	if container == nil {
+		return nil
+	}
+
+	containerID := container.ID
+	containerName := container.Name
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		jsonContent, err := v.dockerClient.InspectContainerRaw(ctx, containerID)
+		if err != nil {
+			return containerInspectErrorMsg{err: err}
+		}
+
+		return containerInspectMsg{
+			containerName: containerName,
+			jsonContent:   jsonContent,
 		}
 	}
 }

@@ -85,6 +85,13 @@ func (v *HelpView) Init() tea.Cmd {
 
 // Update 处理消息并更新视图状态
 func (v *HelpView) Update(msg tea.Msg) (View, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "esc" || msg.String() == "?" {
+			// ESC 或 ? 返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
+		}
+	}
 	return v, nil
 }
 

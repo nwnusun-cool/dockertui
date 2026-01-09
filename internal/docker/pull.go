@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/docker/docker/api/types/image"
+	dockerimage "github.com/docker/docker/api/types/image"
 )
 
 // pullEvent Docker 拉取事件的 JSON 结构
@@ -40,7 +40,7 @@ func (c *LocalClient) PullImageWithProgress(ctx context.Context, imageRef string
 		progressChan <- *progress
 
 		// 开始拉取
-		reader, err := c.cli.ImagePull(ctx, imageRef, image.PullOptions{})
+		reader, err := c.cli.ImagePull(ctx, imageRef, dockerimage.PullOptions{})
 		if err != nil {
 			progress.Status = PullStatusError
 			progress.Error = err

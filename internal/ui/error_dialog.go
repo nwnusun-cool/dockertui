@@ -80,7 +80,8 @@ func (d *ErrorDialog) Update(msg tea.Msg) bool {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// ESC 或 Enter 关闭弹窗
-		if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || msg.String() == "esc" || msg.String() == "enter" {
+		switch msg.String() {
+		case "esc", "enter":
 			d.Hide()
 			return true
 		}

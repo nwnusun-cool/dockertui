@@ -114,6 +114,9 @@ type ImageListView struct {
 	
 	// 错误弹窗
 	errorDialog *ErrorDialog // 错误弹窗组件
+
+	// JSON 查看器
+	jsonViewer *JSONViewer // JSON 查看器
 }
 
 // NewImageListView 创建镜像列表视图
@@ -170,6 +173,7 @@ func NewImageListView(dockerClient docker.Client) *ImageListView {
 		taskBar:      NewTaskBar(),
 		tagInput:     NewTagInputView(),
 		errorDialog:  NewErrorDialog(),
+		jsonViewer:   NewJSONViewer(),
 	}
 }
 
@@ -181,6 +185,15 @@ func (v *ImageListView) Init() tea.Cmd {
 
 // Update 处理消息并更新视图状态
 func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
+	// 如果显示 JSON 查看器，优先处理
+	if v.jsonViewer != nil && v.jsonViewer.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			if v.jsonViewer.Update(keyMsg) {
+				return v, nil
+			}
+		}
+	}
+
 	switch msg := msg.(type) {
 	case imagesLoadedMsg:
 		// 镜像列表加载完成
@@ -231,6 +244,20 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		// 清除成功消息
 		if time.Since(v.successMsgTime) >= 3*time.Second {
 			v.successMsg = ""
+		}
+		return v, nil
+
+	case imageInspectMsg:
+		// 显示 JSON 查看器
+		if v.jsonViewer != nil {
+			v.jsonViewer.SetSize(v.width, v.height)
+			v.jsonViewer.Show("Image Inspect: "+msg.imageName, msg.jsonContent)
+		}
+		return v, nil
+
+	case imageInspectErrorMsg:
+		if v.errorDialog != nil {
+			v.errorDialog.ShowError(fmt.Sprintf("获取镜像信息失败: %v", msg.err))
 		}
 		return v, nil
 
@@ -448,6 +475,39 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 
 		// 处理快捷键
 		switch msg.String() {
+		case "esc":
+			// ESC 优先级：清除搜索 > 清除筛选 > 返回上一级
+			if v.searchQuery != "" {
+				v.searchQuery = ""
+				v.applyFilters()
+				v.updateColumnWidths()
+				return v, nil
+			}
+			if v.filterType != "all" {
+				v.filterType = "all"
+				v.applyFilters()
+				v.updateColumnWidths()
+				return v, nil
+			}
+			// 没有搜索和筛选条件，返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
+		case "f":
+			// 切换筛选状态：all -> active -> dangling -> unused -> all
+			switch v.filterType {
+			case "all":
+				v.filterType = "active"
+			case "active":
+				v.filterType = "dangling"
+			case "dangling":
+				v.filterType = "unused"
+			case "unused":
+				v.filterType = "all"
+			default:
+				v.filterType = "all"
+			}
+			v.applyFilters()
+			v.updateColumnWidths()
+			return v, nil
 		case "/":
 			v.isSearching = true
 			v.searchQuery = ""
@@ -518,6 +578,9 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case "t":
 			// 打标签
 			return v, v.showTagInput()
+		case "i":
+			// 检查镜像（显示 JSON）
+			return v, v.inspectImage()
 		}
 	}
 
@@ -526,6 +589,11 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 
 // View 渲染镜像列表视图
 func (v *ImageListView) View() string {
+	// 如果显示 JSON 查看器
+	if v.jsonViewer != nil && v.jsonViewer.IsVisible() {
+		return v.jsonViewer.View()
+	}
+
 	var s string
 
 	// 顶部状态栏和操作提示
@@ -611,6 +679,12 @@ func (v *ImageListView) View() string {
 		cancelHint := imageSearchHintStyle.Render("[Enter=Confirm | ESC=Cancel]")
 
 		s += searchLine + searchPrompt + searchInput + "    " + cancelHint + "\n"
+	}
+
+	// 底部左下角筛选状态提示（非搜索模式时显示）
+	if !v.isSearching && v.filterType != "all" {
+		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + imageSearchHintStyle.Render("按 ESC 清除筛选，按 f 切换") + "\n"
 	}
 
 	// 任务进度条（如果有活跃任务）
@@ -716,37 +790,31 @@ func (v *ImageListView) renderStatusBar() string {
 
 	var lines []string
 
-	// 第一行：Docker 状态 + 基本操作
-	row1Label := labelStyle.Render("Docker: Connected")
-	row1Keys := makeItem("<a>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
+	// 第一行：镜像标题 + 基本操作
+	row1Label := labelStyle.Render("🖼️ Images")
+	row1Keys := makeItem("<f>", "Filter") + makeItem("</>", "Search") + makeItem("<r>", "Refresh")
 	lines = append(lines, "  "+row1Label+row1Keys)
 
 	// 第二行：镜像操作
 	row2Label := labelStyle.Render("Ops:")
-	row2Keys := makeItem("<d>", "Delete") + makeItem("<p>", "Prune") + makeItem("<i>", "Inspect") + makeItem("<e>", "Export")
+	row2Keys := makeItem("<d>", "Delete") + makeItem("<p>", "Prune") + makeItem("<P>", "Pull")
 	lines = append(lines, "  "+row2Label+row2Keys)
 
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<t>", "Tag") + makeItem("<u>", "Untag") + makeItem("<P>", "Push") + makeItem("<p>", "Pull")
+	row3Keys := makeItem("<t>", "Tag") + makeItem("<u>", "Untag") + makeItem("<e>", "Export")
 	lines = append(lines, "  "+row3Label+row3Keys)
 
-	// 第四行：查看操作
-	row4Label := labelStyle.Render("View:")
-	row4Keys := makeItem("<Enter>", "Details") + makeItem("<c>", "Containers") + makeItem("<Esc>", "Back") + makeItem("<q>", "Quit")
-	lines = append(lines, "  "+row4Label+row4Keys)
-
-	// 第五行：版本 + 刷新时间 + vim 提示
-	versionInfo := "v0.1.0"
+	// 第四行：刷新时间 + vim 提示
 	refreshInfo := "-"
 	if !v.lastRefreshTime.IsZero() {
 		refreshInfo = formatDuration(time.Since(v.lastRefreshTime)) + " ago"
 	}
 
-	row5Label := labelStyle.Render("Version: " + versionInfo)
-	row5Info := hintStyle.Render("Last Refresh: "+refreshInfo) + "    " +
-		hintStyle.Render("(vim): j/k=上下  h/l=左右滚动  Enter=选择  Esc=返回  q=退出")
-	lines = append(lines, "  "+row5Label+row5Info)
+	row4Label := labelStyle.Render("Last Refresh:")
+	row4Info := hintStyle.Render(refreshInfo) + "    " +
+		hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
+	lines = append(lines, "  "+row4Label+row4Info)
 
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
@@ -870,6 +938,15 @@ type imagesLoadedMsg struct {
 }
 
 type imagesLoadErrorMsg struct {
+	err error
+}
+
+type imageInspectMsg struct {
+	imageName   string
+	jsonContent string
+}
+
+type imageInspectErrorMsg struct {
 	err error
 }
 
@@ -1011,6 +1088,9 @@ func (v *ImageListView) updateColumnWidths() {
 				}
 			}
 			v.scrollTable.SetRows(rows)
+		} else {
+			// 清空表格数据
+			v.scrollTable.SetRows([]TableRow{})
 		}
 	}
 
@@ -1018,6 +1098,8 @@ func (v *ImageListView) updateColumnWidths() {
 	if len(v.filteredImages) > 0 {
 		rows := v.imagesToRows(v.filteredImages)
 		v.tableModel.SetRows(rows)
+	} else {
+		v.tableModel.SetRows([]table.Row{})
 	}
 }
 
@@ -1107,6 +1189,32 @@ func (v *ImageListView) GetSelectedImage() *docker.Image {
 		return nil
 	}
 	return &v.filteredImages[selectedIndex]
+}
+
+// inspectImage 获取镜像的原始 JSON
+func (v *ImageListView) inspectImage() tea.Cmd {
+	image := v.GetSelectedImage()
+	if image == nil {
+		return nil
+	}
+
+	imageID := image.ID
+	imageName := image.Repository + ":" + image.Tag
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		jsonContent, err := v.dockerClient.InspectImageRaw(ctx, imageID)
+		if err != nil {
+			return imageInspectErrorMsg{err: err}
+		}
+
+		return imageInspectMsg{
+			imageName:   imageName,
+			jsonContent: jsonContent,
+		}
+	}
 }
 
 // overlayPullInput 将拉取输入框叠加到现有内容上（居中显示）

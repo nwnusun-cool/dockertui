@@ -191,6 +191,9 @@ func (v *ComposeListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "esc":
+			// ESC 返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
 		case "j", "down":
 			v.tableModel.MoveDown(1)
 			return v, nil

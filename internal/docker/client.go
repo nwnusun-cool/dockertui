@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
+
+	"docktui/internal/docker/image"
+	"docktui/internal/docker/network"
 )
 
 // Docker Endpoint 配置说明（Windows 环境）：
@@ -89,63 +92,46 @@ type MountInfo struct {
 	Mode        string // 读写模式: rw, ro
 }
 
-// Image 表示镜像的基本信息（用于列表视图）
-type Image struct {
-	ID         string            // 镜像 ID（完整）
-	ShortID    string            // 镜像 ID（短，12位）
-	Repository string            // 仓库名
-	Tag        string            // 标签
-	Size       int64             // 大小（字节）
-	Created    time.Time         // 创建时间
-	Digest     string            // 摘要
-	Labels     map[string]string // 标签
+// ===== 镜像类型别名（委托给 image 包）=====
+// 保持向后兼容，现有代码无需修改
 
-	// 运行时状态
-	InUse      bool     // 是否被容器使用
-	Dangling   bool     // 是否为悬垂镜像（无标签）
-	Containers []string // 使用此镜像的容器 ID 列表
-}
+// Image 表示镜像的基本信息（用于列表视图）
+type Image = image.Image
 
 // ContainerRef 表示容器引用信息
-type ContainerRef struct {
-	ID    string // 容器 ID
-	Name  string // 容器名称
-	State string // 容器状态: running, exited, paused 等
-}
+type ContainerRef = image.ContainerRef
 
 // ImageDetails 表示镜像的详细信息（用于详情视图）
-type ImageDetails struct {
-	ID            string            // 镜像 ID
-	Repository    string            // 仓库名
-	Tag           string            // 标签
-	Size          int64             // 大小（字节）
-	Created       time.Time         // 创建时间
-	Digest        string            // 摘要
-	Labels        map[string]string // 标签
-	Architecture  string            // 架构
-	OS            string            // 操作系统
-	Author        string            // 作者
-	Comment       string            // 注释
-	Layers        []string          // 层 ID 列表
-	History       []ImageHistory    // 镜像构建历史
-	Env           []string          // 环境变量
-	Cmd           []string          // 默认命令
-	Entrypoint    []string          // 入口点
-	WorkingDir    string            // 工作目录
-	ExposedPorts  []string          // 暴露的端口
-	Volumes       []string          // 卷
-	User          string            // 用户
-	Containers    []ContainerRef    // 使用此镜像的容器列表
-}
+type ImageDetails = image.Details
 
 // ImageHistory 表示镜像构建历史的一条记录
-type ImageHistory struct {
-	ID        string    // 层 ID（可能为 <missing>）
-	Created   time.Time // 创建时间
-	CreatedBy string    // 创建命令
-	Size      int64     // 大小（字节）
-	Comment   string    // 注释
-}
+type ImageHistory = image.History
+
+// ===== 网络类型别名（委托给 network 包）=====
+
+// Network 表示网络的基本信息（用于列表视图）
+type Network = network.Network
+
+// NetworkDetails 表示网络的详细信息（用于详情视图）
+type NetworkDetails = network.Details
+
+// NetworkIPAMConfig IP 地址管理配置
+type NetworkIPAMConfig = network.IPAMConfig
+
+// NetworkIPAMPoolConfig IP 池配置
+type NetworkIPAMPoolConfig = network.IPAMPoolConfig
+
+// NetworkContainerEndpoint 容器在网络中的端点信息
+type NetworkContainerEndpoint = network.ContainerEndpoint
+
+// NetworkCreateOptions 创建网络的选项
+type NetworkCreateOptions = network.CreateOptions
+
+// NetworkConnectOptions 连接容器到网络的选项
+type NetworkConnectOptions = network.ConnectOptions
+
+// NetworkDisconnectOptions 断开容器与网络连接的选项
+type NetworkDisconnectOptions = network.DisconnectOptions
 
 // ContainerUpdateConfig 容器更新配置
 // 注意：CPU/内存限制仅在 Linux 原生 Docker 或 WSL2 后端支持
@@ -191,6 +177,9 @@ type Client interface {
 
 	// ContainerDetails 获取指定容器的详细信息
 	ContainerDetails(ctx context.Context, containerID string) (*ContainerDetails, error)
+
+	// InspectContainerRaw 获取容器的原始 JSON 数据
+	InspectContainerRaw(ctx context.Context, containerID string) (string, error)
 
 	// ContainerStats 获取容器资源使用统计
 	ContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)
@@ -246,6 +235,9 @@ type Client interface {
 	// ImageDetails 获取指定镜像的详细信息
 	ImageDetails(ctx context.Context, imageID string) (*ImageDetails, error)
 
+	// InspectImageRaw 获取镜像的原始 JSON 数据
+	InspectImageRaw(ctx context.Context, imageID string) (string, error)
+
 	// RemoveImage 删除镜像
 	// force: 是否强制删除（即使有容器使用）
 	// prune: 是否删除未标记的父镜像
@@ -285,13 +277,43 @@ type Client interface {
 	// 返回 io.ReadCloser 用于读取推送进度，调用方负责关闭
 	PushImage(ctx context.Context, imageRef string) (io.ReadCloser, error)
 
+	// ===== 网络管理 =====
+
+	// ListNetworks 获取网络列表
+	ListNetworks(ctx context.Context) ([]Network, error)
+
+	// NetworkDetails 获取指定网络的详细信息
+	NetworkDetails(ctx context.Context, networkID string) (*NetworkDetails, error)
+
+	// CreateNetwork 创建网络
+	// 返回新创建的网络 ID
+	CreateNetwork(ctx context.Context, opts NetworkCreateOptions) (string, error)
+
+	// RemoveNetwork 删除网络
+	RemoveNetwork(ctx context.Context, networkID string) error
+
+	// PruneNetworks 清理未使用的网络
+	// 返回删除的网络名称列表
+	PruneNetworks(ctx context.Context) ([]string, error)
+
+	// ConnectNetwork 将容器连接到网络
+	ConnectNetwork(ctx context.Context, networkID string, opts NetworkConnectOptions) error
+
+	// DisconnectNetwork 将容器从网络断开
+	DisconnectNetwork(ctx context.Context, networkID string, opts NetworkDisconnectOptions) error
+
+	// InspectNetworkRaw 获取网络的原始 JSON 数据
+	InspectNetworkRaw(ctx context.Context, networkID string) (string, error)
+
 	// Close 关闭客户端连接，释放资源
 	Close() error
 }
 
 // LocalClient 封装本地 Docker SDK 客户端实现。
 type LocalClient struct {
-	cli *sdk.Client
+	cli        *sdk.Client
+	imageCli   *image.Client   // 镜像操作客户端
+	networkCli *network.Client // 网络操作客户端
 }
 
 // NewLocalClientFromEnv 基于环境变量创建本地 Docker 客户端，并开启 API 版本协商。
@@ -303,7 +325,11 @@ func NewLocalClientFromEnv() (*LocalClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 Docker 客户端失败: %w", err)
 	}
-	return &LocalClient{cli: cli}, nil
+	return &LocalClient{
+		cli:        cli,
+		imageCli:   image.NewClient(cli),
+		networkCli: network.NewClient(cli),
+	}, nil
 }
 
 // Ping 用于验证 Docker 守护进程是否可用。
@@ -511,6 +537,27 @@ func (c *LocalClient) ContainerDetails(ctx context.Context, containerID string) 
 	}, nil
 }
 
+// InspectContainerRaw 获取容器的原始 JSON 数据
+func (c *LocalClient) InspectContainerRaw(ctx context.Context, containerID string) (string, error) {
+	if c == nil || c.cli == nil {
+		return "", fmt.Errorf("Docker 客户端未初始化")
+	}
+
+	// 调用 Docker SDK 获取容器详细信息
+	inspectResp, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("获取容器详情失败: %w", err)
+	}
+
+	// 格式化为 JSON
+	jsonData, err := json.MarshalIndent(inspectResp, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("JSON 序列化失败: %w", err)
+	}
+
+	return string(jsonData), nil
+}
+
 // ContainerLogs 获取容器日志
 func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opts LogOptions) (io.ReadCloser, error) {
 	if c == nil || c.cli == nil {
@@ -558,396 +605,94 @@ func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opt
 // 详细实现请查看 exec.go 文件
 // 实际实现在 exec.go 中的 ExecShell 方法
 
+// ===== 镜像管理方法（委托给 image.Client）=====
+
 // ListImages 获取镜像列表
 func (c *LocalClient) ListImages(ctx context.Context, showAll bool) ([]Image, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return nil, fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// 构建过滤器
-	filterArgs := filters.NewArgs()
-	if !showAll {
-		// 不显示悬垂镜像
-		filterArgs.Add("dangling", "false")
-	}
-
-	// 调用 Docker SDK 获取镜像列表
-	images, err := c.cli.ImageList(ctx, image.ListOptions{
-		All:     showAll,
-		Filters: filterArgs,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("获取镜像列表失败: %w", err)
-	}
-
-	// 获取所有容器，用于判断镜像是否被使用
-	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
-	if err != nil {
-		return nil, fmt.Errorf("获取容器列表失败: %w", err)
-	}
-
-	// 构建镜像ID到容器ID的映射
-	imageToContainers := make(map[string][]string)
-	for _, cont := range containers {
-		imageToContainers[cont.ImageID] = append(imageToContainers[cont.ImageID], cont.ID)
-	}
-
-	// 转换为内部数据结构
-	result := make([]Image, 0, len(images))
-	for _, img := range images {
-		// 短 ID（12位）
-		shortID := img.ID
-		if strings.HasPrefix(shortID, "sha256:") {
-			shortID = shortID[7:]
-		}
-		if len(shortID) > 12 {
-			shortID = shortID[:12]
-		}
-
-		// 判断是否被容器使用
-		containerIDs := imageToContainers[img.ID]
-		inUse := len(containerIDs) > 0
-
-		// 提取摘要
-		digest := ""
-		if len(img.RepoDigests) > 0 {
-			digest = img.RepoDigests[0]
-		}
-
-		// 如果有多个标签，为每个标签创建一个列表项
-		if len(img.RepoTags) > 0 {
-			for _, repoTag := range img.RepoTags {
-				repository := "<none>"
-				tag := "<none>"
-				parts := strings.Split(repoTag, ":")
-				if len(parts) == 2 {
-					repository = parts[0]
-					tag = parts[1]
-				} else {
-					repository = repoTag
-				}
-
-				// 判断是否为悬垂镜像
-				dangling := repository == "<none>" && tag == "<none>"
-
-				result = append(result, Image{
-					ID:         img.ID,
-					ShortID:    shortID,
-					Repository: repository,
-					Tag:        tag,
-					Size:       img.Size,
-					Created:    time.Unix(img.Created, 0),
-					Digest:     digest,
-					Labels:     img.Labels,
-					InUse:      inUse,
-					Dangling:   dangling,
-					Containers: containerIDs,
-				})
-			}
-		} else {
-			// 没有标签的镜像（悬垂镜像）
-			result = append(result, Image{
-				ID:         img.ID,
-				ShortID:    shortID,
-				Repository: "<none>",
-				Tag:        "<none>",
-				Size:       img.Size,
-				Created:    time.Unix(img.Created, 0),
-				Digest:     digest,
-				Labels:     img.Labels,
-				InUse:      inUse,
-				Dangling:   true,
-				Containers: containerIDs,
-			})
-		}
-	}
-
-	return result, nil
+	return c.imageCli.List(ctx, showAll)
 }
 
 // ImageDetails 获取指定镜像的详细信息
 func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageDetails, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return nil, fmt.Errorf("Docker 客户端未初始化")
 	}
+	return c.imageCli.GetDetails(ctx, imageID)
+}
 
-	// 调用 Docker SDK 获取镜像详细信息
-	inspectResp, _, err := c.cli.ImageInspectWithRaw(ctx, imageID)
-	if err != nil {
-		return nil, fmt.Errorf("获取镜像详情失败: %w", err)
+// InspectImageRaw 获取镜像的原始 JSON 数据
+func (c *LocalClient) InspectImageRaw(ctx context.Context, imageID string) (string, error) {
+	if c == nil || c.imageCli == nil {
+		return "", fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// 仓库名和标签
-	repository := "<none>"
-	tag := "<none>"
-	if len(inspectResp.RepoTags) > 0 {
-		parts := strings.Split(inspectResp.RepoTags[0], ":")
-		if len(parts) == 2 {
-			repository = parts[0]
-			tag = parts[1]
-		} else {
-			repository = inspectResp.RepoTags[0]
-		}
-	}
-
-	// 提取暴露的端口
-	exposedPorts := make([]string, 0)
-	if inspectResp.Config != nil && inspectResp.Config.ExposedPorts != nil {
-		for port := range inspectResp.Config.ExposedPorts {
-			exposedPorts = append(exposedPorts, string(port))
-		}
-	}
-
-	// 提取卷
-	volumes := make([]string, 0)
-	if inspectResp.Config != nil && inspectResp.Config.Volumes != nil {
-		for vol := range inspectResp.Config.Volumes {
-			volumes = append(volumes, vol)
-		}
-	}
-
-	// 获取使用此镜像的容器
-	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
-	if err != nil {
-		return nil, fmt.Errorf("获取容器列表失败: %w", err)
-	}
-
-	containerRefs := make([]ContainerRef, 0)
-	for _, cont := range containers {
-		if cont.ImageID == inspectResp.ID {
-			// 提取容器名称（去除前导 /）
-			containerName := ""
-			if len(cont.Names) > 0 {
-				containerName = cont.Names[0]
-				if len(containerName) > 0 && containerName[0] == '/' {
-					containerName = containerName[1:]
-				}
-			}
-
-			containerRefs = append(containerRefs, ContainerRef{
-				ID:    cont.ID,
-				Name:  containerName,
-				State: string(cont.State),
-			})
-		}
-	}
-
-	// 提取环境变量、命令、入口点等
-	env := []string{}
-	cmd := []string{}
-	entrypoint := []string{}
-	workingDir := ""
-	user := ""
-
-	if inspectResp.Config != nil {
-		env = inspectResp.Config.Env
-		cmd = inspectResp.Config.Cmd
-		entrypoint = inspectResp.Config.Entrypoint
-		workingDir = inspectResp.Config.WorkingDir
-		user = inspectResp.Config.User
-	}
-
-	// 提取摘要
-	digest := ""
-	if len(inspectResp.RepoDigests) > 0 {
-		digest = inspectResp.RepoDigests[0]
-	}
-
-	// 提取标签
-	var labels map[string]string
-	if inspectResp.Config != nil {
-		labels = inspectResp.Config.Labels
-	}
-
-	// 提取层信息
-	var layers []string
-	if inspectResp.RootFS.Type != "" {
-		layers = inspectResp.RootFS.Layers
-	}
-
-	// 解析创建时间
-	created := time.Now()
-	if inspectResp.Created != "" {
-		if t, err := time.Parse(time.RFC3339Nano, inspectResp.Created); err == nil {
-			created = t
-		}
-	}
-
-	// 获取镜像构建历史
-	historyResp, err := c.cli.ImageHistory(ctx, imageID)
-	var history []ImageHistory
-	if err == nil {
-		for _, h := range historyResp {
-			historyItem := ImageHistory{
-				ID:        h.ID,
-				Created:   time.Unix(h.Created, 0),
-				CreatedBy: h.CreatedBy,
-				Size:      h.Size,
-				Comment:   h.Comment,
-			}
-			// 如果 ID 为空，显示为 <missing>
-			if historyItem.ID == "" {
-				historyItem.ID = "<missing>"
-			}
-			history = append(history, historyItem)
-		}
-	}
-
-	return &ImageDetails{
-		ID:           inspectResp.ID,
-		Repository:   repository,
-		Tag:          tag,
-		Size:         inspectResp.Size,
-		Created:      created,
-		Digest:       digest,
-		Labels:       labels,
-		Architecture: inspectResp.Architecture,
-		OS:           inspectResp.Os,
-		Author:       inspectResp.Author,
-		Comment:      inspectResp.Comment,
-		Layers:       layers,
-		History:      history,
-		Env:          env,
-		Cmd:          cmd,
-		Entrypoint:   entrypoint,
-		WorkingDir:   workingDir,
-		ExposedPorts: exposedPorts,
-		Volumes:      volumes,
-		User:         user,
-		Containers:   containerRefs,
-	}, nil
+	return c.imageCli.InspectRaw(ctx, imageID)
 }
 
 // RemoveImage 删除镜像
 func (c *LocalClient) RemoveImage(ctx context.Context, imageID string, force bool, prune bool) error {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	_, err := c.cli.ImageRemove(ctx, imageID, image.RemoveOptions{
-		Force:         force,
-		PruneChildren: prune,
-	})
-	if err != nil {
-		return fmt.Errorf("删除镜像失败: %w", err)
-	}
-
-	return nil
+	return c.imageCli.Remove(ctx, imageID, force, prune)
 }
 
 // PruneImages 清理悬垂镜像
 func (c *LocalClient) PruneImages(ctx context.Context) (int, int64, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return 0, 0, fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// 构建过滤器，只清理悬垂镜像
-	filterArgs := filters.NewArgs()
-	filterArgs.Add("dangling", "true")
-
-	report, err := c.cli.ImagesPrune(ctx, filterArgs)
-	if err != nil {
-		return 0, 0, fmt.Errorf("清理镜像失败: %w", err)
-	}
-
-	return len(report.ImagesDeleted), int64(report.SpaceReclaimed), nil
+	return c.imageCli.Prune(ctx)
 }
 
 // TagImage 给镜像打标签
 func (c *LocalClient) TagImage(ctx context.Context, imageID string, repository string, tag string) error {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// 构建完整的标签引用
-	ref := repository + ":" + tag
-
-	err := c.cli.ImageTag(ctx, imageID, ref)
-	if err != nil {
-		return fmt.Errorf("打标签失败: %w", err)
-	}
-
-	return nil
+	return c.imageCli.Tag(ctx, imageID, repository, tag)
 }
 
 // UntagImage 删除镜像标签
 func (c *LocalClient) UntagImage(ctx context.Context, imageRef string) error {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// 删除标签（不强制，不删除子镜像）
-	_, err := c.cli.ImageRemove(ctx, imageRef, image.RemoveOptions{
-		Force:         false,
-		PruneChildren: false,
-	})
-	if err != nil {
-		return fmt.Errorf("删除标签失败: %w", err)
-	}
-
-	return nil
+	return c.imageCli.Untag(ctx, imageRef)
 }
 
 // SaveImage 导出镜像到 tar 文件
 func (c *LocalClient) SaveImage(ctx context.Context, imageIDs []string) (io.ReadCloser, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return nil, fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	reader, err := c.cli.ImageSave(ctx, imageIDs)
-	if err != nil {
-		return nil, fmt.Errorf("导出镜像失败: %w", err)
-	}
-
-	return reader, nil
+	return c.imageCli.Save(ctx, imageIDs)
 }
 
 // LoadImage 从 tar 文件加载镜像
 func (c *LocalClient) LoadImage(ctx context.Context, input io.Reader, quiet bool) error {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	// Docker SDK v28+ ImageLoad 不接受 quiet 参数
-	resp, err := c.cli.ImageLoad(ctx, input)
-	if err != nil {
-		return fmt.Errorf("加载镜像失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应以确保完成
-	// quiet 参数在我们的接口中保留，用于控制是否处理输出
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	return nil
+	return c.imageCli.Load(ctx, input, quiet)
 }
 
 // PullImage 拉取镜像
 func (c *LocalClient) PullImage(ctx context.Context, imageRef string) (io.ReadCloser, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return nil, fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	reader, err := c.cli.ImagePull(ctx, imageRef, image.PullOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("拉取镜像失败: %w", err)
-	}
-
-	return reader, nil
+	return c.imageCli.Pull(ctx, imageRef)
 }
 
 // PushImage 推送镜像到 registry
 func (c *LocalClient) PushImage(ctx context.Context, imageRef string) (io.ReadCloser, error) {
-	if c == nil || c.cli == nil {
+	if c == nil || c.imageCli == nil {
 		return nil, fmt.Errorf("Docker 客户端未初始化")
 	}
-
-	reader, err := c.cli.ImagePush(ctx, imageRef, image.PushOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("推送镜像失败: %w", err)
-	}
-
-	return reader, nil
+	return c.imageCli.Push(ctx, imageRef)
 }
 
 // Close 关闭 Docker 客户端连接
@@ -1179,4 +924,70 @@ func (c *LocalClient) UpdateContainer(ctx context.Context, containerID string, c
 	}
 
 	return nil
+}
+
+// ===== 网络管理方法（委托给 network.Client）=====
+
+// ListNetworks 获取网络列表
+func (c *LocalClient) ListNetworks(ctx context.Context) ([]Network, error) {
+	if c == nil || c.networkCli == nil {
+		return nil, fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.List(ctx)
+}
+
+// NetworkDetails 获取指定网络的详细信息
+func (c *LocalClient) NetworkDetails(ctx context.Context, networkID string) (*NetworkDetails, error) {
+	if c == nil || c.networkCli == nil {
+		return nil, fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.GetDetails(ctx, networkID)
+}
+
+// CreateNetwork 创建网络
+func (c *LocalClient) CreateNetwork(ctx context.Context, opts NetworkCreateOptions) (string, error) {
+	if c == nil || c.networkCli == nil {
+		return "", fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.Create(ctx, opts)
+}
+
+// RemoveNetwork 删除网络
+func (c *LocalClient) RemoveNetwork(ctx context.Context, networkID string) error {
+	if c == nil || c.networkCli == nil {
+		return fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.Remove(ctx, networkID)
+}
+
+// PruneNetworks 清理未使用的网络
+func (c *LocalClient) PruneNetworks(ctx context.Context) ([]string, error) {
+	if c == nil || c.networkCli == nil {
+		return nil, fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.Prune(ctx)
+}
+
+// ConnectNetwork 将容器连接到网络
+func (c *LocalClient) ConnectNetwork(ctx context.Context, networkID string, opts NetworkConnectOptions) error {
+	if c == nil || c.networkCli == nil {
+		return fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.Connect(ctx, networkID, opts)
+}
+
+// DisconnectNetwork 将容器从网络断开
+func (c *LocalClient) DisconnectNetwork(ctx context.Context, networkID string, opts NetworkDisconnectOptions) error {
+	if c == nil || c.networkCli == nil {
+		return fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.Disconnect(ctx, networkID, opts)
+}
+
+// InspectNetworkRaw 获取网络的原始 JSON 数据
+func (c *LocalClient) InspectNetworkRaw(ctx context.Context, networkID string) (string, error) {
+	if c == nil || c.networkCli == nil {
+		return "", fmt.Errorf("Docker 客户端未初始化")
+	}
+	return c.networkCli.InspectRaw(ctx, networkID)
 }

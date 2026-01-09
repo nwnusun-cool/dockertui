@@ -128,6 +128,9 @@ func (v *ImageDetailsView) Update(msg tea.Msg) (View, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
+		case "esc":
+			// ESC 返回上一级
+			return v, func() tea.Msg { return GoBackMsg{} }
 		case "tab", "l", "right":
 			// 切换到下一个标签页
 			v.activeTab = (v.activeTab + 1) % ImageDetailsTab(len(imageTabNames))
