@@ -122,9 +122,12 @@ type ContainerListView struct {
 	
 	// 确认对话框状态（O2）
 	showConfirmDialog bool   // 是否显示确认对话框
-	confirmAction     string // 确认的操作类型: "remove"
-	confirmContainer  *docker.Container // 待操作的容器
+	confirmAction     string // 确认的操作类型: "remove", "batch_start", "batch_stop", "batch_restart", "batch_remove"
+	confirmContainer  *docker.Container // 待操作的容器（单个操作时使用）
 	confirmSelection  int    // 确认对话框中的选择: 0=Cancel, 1=OK
+	
+	// 多选功能
+	selectedContainers map[string]bool // 已选中的容器 ID
 	
 	// 编辑视图
 	editView *ContainerEditView // 容器配置编辑视图
@@ -174,6 +177,7 @@ func NewContainerListView(dockerClient docker.Client) *ContainerListView {
 	
 	// 创建可滚动表格（NAME 移到第二列）
 	scrollColumns := []TableColumn{
+		{Title: "SEL", Width: 3},  // 选择列
 		{Title: "CONTAINER ID", Width: 14},
 		{Title: "NAMES", Width: 20},
 		{Title: "IMAGE", Width: 30},
@@ -185,16 +189,17 @@ func NewContainerListView(dockerClient docker.Client) *ContainerListView {
 	scrollTable := NewScrollableTable(scrollColumns)
 	
 	return &ContainerListView{
-		dockerClient: dockerClient,
-		tableModel:   t,
-		scrollTable:  scrollTable,
-		keys:         DefaultKeyMap(),
-		searchQuery:  "",
-		isSearching:  false,
-		filterType:   "all",
-		editView:     NewContainerEditView(),
-		errorDialog:  NewErrorDialog(),
-		jsonViewer:   NewJSONViewer(),
+		dockerClient:       dockerClient,
+		tableModel:         t,
+		scrollTable:        scrollTable,
+		keys:               DefaultKeyMap(),
+		searchQuery:        "",
+		isSearching:        false,
+		filterType:         "all",
+		selectedContainers: make(map[string]bool),
+		editView:           NewContainerEditView(),
+		errorDialog:        NewErrorDialog(),
+		jsonViewer:         NewJSONViewer(),
 	}
 }
 
@@ -294,6 +299,25 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		v.successMsgTime = time.Now()
 		v.errorMsg = "" // 清除错误消息
 		return v, v.clearSuccessMessageAfter(3 * time.Second)
+
+	case containerBatchOperationMsg:
+		// 容器批量操作结果
+		if msg.failedCount > 0 {
+			// 部分成功
+			v.successMsg = fmt.Sprintf("⚠️ %s: 成功 %d 个, 失败 %d 个", msg.operation, msg.successCount, msg.failedCount)
+			if msg.err != nil && v.errorDialog != nil {
+				v.errorDialog.ShowError(fmt.Sprintf("%s失败 (%s): %v", msg.operation, strings.Join(msg.failedNames, ", "), msg.err))
+			}
+		} else {
+			// 全部成功
+			v.successMsg = fmt.Sprintf("✅ %s成功: %d 个容器", msg.operation, msg.successCount)
+		}
+		v.successMsgTime = time.Now()
+		v.errorMsg = ""
+		return v, tea.Batch(
+			v.loadContainers,
+			v.clearSuccessMessageAfter(3*time.Second),
+		)
 		
 	case clearSuccessMessageMsg:
 		// 清除成功消息
@@ -519,13 +543,13 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			v.tableModel.GotoBottom()
 			return v, nil
 		case msg.String() == "t":
-			// 启动容器（Start）
+			// 启动容器（sTart）
 			return v, v.startSelectedContainer()
-		case msg.String() == "p":
-			// 停止容器（Stop）
+		case msg.String() == "o":
+			// 停止容器（stOp）
 			return v, v.stopSelectedContainer()
-		case msg.String() == "P":
-			// 暂停/恢复容器（Pause/Unpause）- 大写 P
+		case msg.String() == "u":
+			// 暂停/恢复容器（paUse/Unpause）
 			return v, v.togglePauseContainer()
 		case msg.String() == "R":
 			// 重启容器（Restart）- 大写 R
@@ -539,6 +563,63 @@ func (v *ContainerListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case msg.String() == "i":
 			// 检查容器（显示 JSON）
 			return v, v.inspectContainer()
+		case msg.String() == " ":
+			// 空格键：切换选择当前容器
+			container := v.GetSelectedContainer()
+			if container != nil {
+				if v.selectedContainers[container.ID] {
+					delete(v.selectedContainers, container.ID)
+				} else {
+					v.selectedContainers[container.ID] = true
+				}
+				v.updateTableData()
+			}
+			return v, nil
+		case msg.String() == "a":
+			// 全选/取消全选
+			// 检查是否所有过滤后的容器都已选中
+			allSelected := true
+			for _, c := range v.filteredContainers {
+				if !v.selectedContainers[c.ID] {
+					allSelected = false
+					break
+				}
+			}
+			if allSelected && len(v.filteredContainers) > 0 {
+				// 已全选，取消全选
+				v.selectedContainers = make(map[string]bool)
+			} else {
+				// 全选
+				for _, c := range v.filteredContainers {
+					v.selectedContainers[c.ID] = true
+				}
+			}
+			v.updateTableData()
+			return v, nil
+		case msg.String() == "enter":
+			// 查看容器详情 - 发送消息给父视图
+			container := v.GetSelectedContainer()
+			if container == nil {
+				return v, nil
+			}
+			return v, func() tea.Msg {
+				return ViewContainerDetailsMsg{
+					ContainerID:   container.ID,
+					ContainerName: container.Name,
+				}
+			}
+		case msg.String() == "L":
+			// 查看容器日志 - 发送消息给父视图（大写 L）
+			container := v.GetSelectedContainer()
+			if container == nil {
+				return v, nil
+			}
+			return v, func() tea.Msg {
+				return ViewContainerLogsMsg{
+					ContainerID:   container.ID,
+					ContainerName: container.Name,
+				}
+			}
 		default:
 			// 其他按键交给 table 处理
 			v.tableModel, _ = v.tableModel.Update(msg)
@@ -770,41 +851,7 @@ func (v *ContainerListView) View() string {
 
 // overlayDialog 将对话框叠加到现有内容上（居中显示）
 func (v *ContainerListView) overlayDialog(baseContent string) string {
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-	
-	// 对话框尺寸
-	dialogHeight := 9
-	
-	// 计算对话框应该插入的位置（垂直居中）
-	insertLine := 0
-	if len(lines) > dialogHeight {
-		insertLine = (len(lines) - dialogHeight) / 2
-	}
-	
-	// 获取对话框内容（不包含顶部填充）
-	dialogContent := v.renderConfirmDialogContent()
-	dialogLines := strings.Split(dialogContent, "\n")
-	
-	// 构建最终输出
-	var result strings.Builder
-	
-	for i := 0; i < len(lines); i++ {
-		dialogIdx := i - insertLine
-		if dialogIdx >= 0 && dialogIdx < len(dialogLines) {
-			// 在这个位置显示对话框行
-			result.WriteString(dialogLines[dialogIdx])
-		} else if i < len(lines) {
-			// 显示原始内容
-			result.WriteString(lines[i])
-		}
-		
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-	
-	return result.String()
+	return OverlayCentered(baseContent, v.renderConfirmDialogContent(), v.width, v.height)
 }
 
 // renderConfirmDialogContent 渲染对话框内容（使用 lipgloss）
@@ -958,24 +1005,38 @@ func (v *ContainerListView) renderStatusBar() string {
 	
 	// 第二行：容器操作
 	row2Label := labelStyle.Render("Ops:")
-	row2Keys := makeItem("<t>", "Start") + makeItem("<p>", "Stop") + makeItem("<P>", "Pause") + makeItem("<R>", "Restart")
+	row2Keys := makeItem("<t>", "Start") + makeItem("<o>", "Stop") + makeItem("<u>", "Pause") + makeItem("<R>", "Restart")
 	lines = append(lines, "  "+row2Label+row2Keys)
 	
 	// 第三行：高级操作
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<e>", "Edit") + makeItem("<i>", "Inspect") + makeItem("<l>", "Logs")
+	row3Keys := makeItem("<Ctrl+D>", "Delete") + makeItem("<e>", "Edit") + makeItem("<i>", "Inspect") + makeItem("<L>", "Logs")
 	lines = append(lines, "  "+row3Label+row3Keys)
+
+	// 第四行：多选操作
+	row4Label := labelStyle.Render("Select:")
+	row4Keys := makeItem("<Space>", "Toggle") + makeItem("<a>", "All")
+	lines = append(lines, "  "+row4Label+row4Keys)
 	
-	// 第四行：刷新时间 + vim 提示
+	// 第五行：刷新时间 + vim 提示
 	refreshInfo := "-"
 	if !v.lastRefreshTime.IsZero() {
 		refreshInfo = formatDuration(time.Since(v.lastRefreshTime)) + " ago"
 	}
 	
-	row4Label := labelStyle.Render("Last Refresh:")
-	row4Info := hintStyle.Render(refreshInfo) + "    " + 
+	row5Label := labelStyle.Render("Last Refresh:")
+	row5Info := hintStyle.Render(refreshInfo) + "    " + 
 		hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
-	lines = append(lines, "  "+row4Label+row4Info)
+	
+	// 如果有选中的容器，显示选中数量
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Bold(true)
+	if len(v.selectedContainers) > 0 {
+		row5Info += "    " + selectedStyle.Render(fmt.Sprintf("[已选: %d]", len(v.selectedContainers)))
+	}
+	
+	lines = append(lines, "  "+row5Label+row5Info)
 	
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
@@ -1251,6 +1312,7 @@ func (v *ContainerListView) updateColumnWidths() {
 	// 更新可滚动表格的列宽和数据（NAME 在第二列）
 	if v.scrollTable != nil {
 		v.scrollTable.SetColumns([]TableColumn{
+			{Title: "SEL", Width: 3},  // 选择列
 			{Title: "CONTAINER ID", Width: maxID + 2},
 			{Title: "NAMES", Width: maxNames + 2},
 			{Title: "IMAGE", Width: maxImage + 2},
@@ -1268,12 +1330,19 @@ func (v *ContainerListView) updateColumnWidths() {
 			exitedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 			pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 			unhealthyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+			selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 			
 			for i, c := range v.filteredContainers {
 				created := formatCreatedTime(c.Created)
 				ports := c.Ports
 				if ports == "" {
 					ports = "-"
+				}
+				
+				// 选择标记
+				selMark := " "
+				if v.selectedContainers[c.ID] {
+					selMark = selectedStyle.Render("✓")
 				}
 				
 				// 根据状态决定是否对整行应用颜色
@@ -1297,6 +1366,7 @@ func (v *ContainerListView) updateColumnWidths() {
 				// 构建行数据
 				if needsStyle {
 					rows[i] = TableRow{
+						selMark,
 						rowStyle.Render(c.ShortID),
 						rowStyle.Render(c.Name),
 						rowStyle.Render(c.Image),
@@ -1307,6 +1377,7 @@ func (v *ContainerListView) updateColumnWidths() {
 					}
 				} else {
 					rows[i] = TableRow{
+						selMark,
 						c.ShortID,
 						c.Name,
 						c.Image,
@@ -1430,6 +1501,15 @@ type containerOperationWarningMsg struct {
 	message string // 警告消息
 }
 
+// containerBatchOperationMsg 容器批量操作结果消息
+type containerBatchOperationMsg struct {
+	operation    string   // 操作类型
+	successCount int      // 成功数量
+	failedCount  int      // 失败数量
+	failedNames  []string // 失败的容器名称
+	err          error    // 最后一个错误
+}
+
 // clearSuccessMessageMsg 清除成功消息
 type clearSuccessMessageMsg struct{}
 
@@ -1486,10 +1566,11 @@ func (v *ContainerListView) watchDockerEvents() tea.Cmd {
 	}
 }
 
-// startSelectedContainer 启动选中的容器
+// startSelectedContainer 启动选中的容器（支持批量）
 func (v *ContainerListView) startSelectedContainer() tea.Cmd {
-	container := v.GetSelectedContainer()
-	if container == nil {
+	// 获取要操作的容器列表
+	containers := v.getSelectedOrCurrentContainers()
+	if len(containers) == 0 {
 		return func() tea.Msg {
 			return containerOperationErrorMsg{
 				operation: "启动容器",
@@ -1499,40 +1580,33 @@ func (v *ContainerListView) startSelectedContainer() tea.Cmd {
 		}
 	}
 
-	// 检查容器状态
-	if container.State == "running" {
+	// 过滤出可以启动的容器（非运行中）
+	var toStart []docker.Container
+	for _, c := range containers {
+		if c.State != "running" {
+			toStart = append(toStart, c)
+		}
+	}
+
+	if len(toStart) == 0 {
 		return func() tea.Msg {
 			return containerOperationWarningMsg{
-				message: fmt.Sprintf("容器 %s 已在运行中", container.Name),
+				message: "所有选中的容器都已在运行中",
 			}
 		}
 	}
 
-	// 执行启动操作
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		err := v.dockerClient.StartContainer(ctx, container.ID)
-		if err != nil {
-			return containerOperationErrorMsg{
-				operation: "启动容器",
-				container: container.Name,
-				err:       err,
-			}
-		}
-
-		return containerOperationSuccessMsg{
-			operation: "启动",
-			container: container.Name,
-		}
-	}
+	// 执行批量启动操作
+	return v.batchContainerOperation("启动", toStart, func(ctx context.Context, id string) error {
+		return v.dockerClient.StartContainer(ctx, id)
+	})
 }
 
-// stopSelectedContainer 停止选中的容器
+// stopSelectedContainer 停止选中的容器（支持批量）
 func (v *ContainerListView) stopSelectedContainer() tea.Cmd {
-	container := v.GetSelectedContainer()
-	if container == nil {
+	// 获取要操作的容器列表
+	containers := v.getSelectedOrCurrentContainers()
+	if len(containers) == 0 {
 		return func() tea.Msg {
 			return containerOperationErrorMsg{
 				operation: "停止容器",
@@ -1542,40 +1616,33 @@ func (v *ContainerListView) stopSelectedContainer() tea.Cmd {
 		}
 	}
 
-	// 检查容器状态
-	if container.State != "running" {
+	// 过滤出可以停止的容器（运行中）
+	var toStop []docker.Container
+	for _, c := range containers {
+		if c.State == "running" {
+			toStop = append(toStop, c)
+		}
+	}
+
+	if len(toStop) == 0 {
 		return func() tea.Msg {
 			return containerOperationWarningMsg{
-				message: fmt.Sprintf("容器 %s 未在运行", container.Name),
+				message: "所有选中的容器都未在运行",
 			}
 		}
 	}
 
-	// 执行停止操作（10秒超时）
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		err := v.dockerClient.StopContainer(ctx, container.ID, 10)
-		if err != nil {
-			return containerOperationErrorMsg{
-				operation: "停止容器",
-				container: container.Name,
-				err:       err,
-			}
-		}
-
-		return containerOperationSuccessMsg{
-			operation: "停止",
-			container: container.Name,
-		}
-	}
+	// 执行批量停止操作
+	return v.batchContainerOperation("停止", toStop, func(ctx context.Context, id string) error {
+		return v.dockerClient.StopContainer(ctx, id, 10)
+	})
 }
 
-// restartSelectedContainer 重启选中的容器
+// restartSelectedContainer 重启选中的容器（支持批量）
 func (v *ContainerListView) restartSelectedContainer() tea.Cmd {
-	container := v.GetSelectedContainer()
-	if container == nil {
+	// 获取要操作的容器列表
+	containers := v.getSelectedOrCurrentContainers()
+	if len(containers) == 0 {
 		return func() tea.Msg {
 			return containerOperationErrorMsg{
 				operation: "重启容器",
@@ -1585,25 +1652,10 @@ func (v *ContainerListView) restartSelectedContainer() tea.Cmd {
 		}
 	}
 
-	// 执行重启操作（10秒超时）
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		err := v.dockerClient.RestartContainer(ctx, container.ID, 10)
-		if err != nil {
-			return containerOperationErrorMsg{
-				operation: "重启容器",
-				container: container.Name,
-				err:       err,
-			}
-		}
-
-		return containerOperationSuccessMsg{
-			operation: "重启",
-			container: container.Name,
-		}
-	}
+	// 执行批量重启操作
+	return v.batchContainerOperation("重启", containers, func(ctx context.Context, id string) error {
+		return v.dockerClient.RestartContainer(ctx, id, 10)
+	})
 }
 
 // showRemoveConfirmDialog 显示删除确认对话框
@@ -1829,42 +1881,7 @@ func (v *ContainerListView) overlayEditView(baseContent string) string {
 	if v.editView == nil {
 		return baseContent
 	}
-
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-
-	// 编辑视图尺寸
-	editHeight := 16
-
-	// 计算编辑视图应该插入的位置（垂直居中）
-	insertLine := 0
-	if len(lines) > editHeight {
-		insertLine = (len(lines) - editHeight) / 2
-	}
-
-	// 获取编辑视图内容
-	editContent := v.editView.View()
-	editLines := strings.Split(editContent, "\n")
-
-	// 构建最终输出
-	var result strings.Builder
-
-	for i := 0; i < len(lines); i++ {
-		editIdx := i - insertLine
-		if editIdx >= 0 && editIdx < len(editLines) {
-			// 在这个位置显示编辑视图行
-			result.WriteString(editLines[editIdx])
-		} else if i < len(lines) {
-			// 显示原始内容
-			result.WriteString(lines[i])
-		}
-
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.editView.View(), v.width, v.height)
 }
 
 // IsEditViewVisible 返回编辑视图是否可见
@@ -1875,4 +1892,165 @@ func (v *ContainerListView) IsEditViewVisible() bool {
 // HasError 返回是否有错误信息显示
 func (v *ContainerListView) HasError() bool {
 	return v.errorDialog != nil && v.errorDialog.IsVisible()
+}
+
+// IsShowingJSONViewer 返回是否正在显示 JSON 查看器
+func (v *ContainerListView) IsShowingJSONViewer() bool {
+	return v.jsonViewer != nil && v.jsonViewer.IsVisible()
+}
+
+// getSelectedOrCurrentContainers 获取选中的容器列表，如果没有多选则返回当前光标所在的容器
+func (v *ContainerListView) getSelectedOrCurrentContainers() []docker.Container {
+	if len(v.selectedContainers) > 0 {
+		// 有多选，返回选中的容器
+		var containers []docker.Container
+		for _, c := range v.filteredContainers {
+			if v.selectedContainers[c.ID] {
+				containers = append(containers, c)
+			}
+		}
+		return containers
+	}
+	
+	// 没有多选，返回当前选中的单个容器
+	container := v.GetSelectedContainer()
+	if container != nil {
+		return []docker.Container{*container}
+	}
+	return nil
+}
+
+// batchContainerOperation 批量执行容器操作
+func (v *ContainerListView) batchContainerOperation(opName string, containers []docker.Container, op func(ctx context.Context, id string) error) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		successCount := 0
+		var lastError error
+		var failedNames []string
+
+		for _, c := range containers {
+			err := op(ctx, c.ID)
+			if err != nil {
+				lastError = err
+				failedNames = append(failedNames, c.Name)
+			} else {
+				successCount++
+			}
+		}
+
+		// 清除选择
+		v.selectedContainers = make(map[string]bool)
+
+		if len(failedNames) > 0 {
+			if successCount > 0 {
+				// 部分成功
+				return containerBatchOperationMsg{
+					operation:    opName,
+					successCount: successCount,
+					failedCount:  len(failedNames),
+					failedNames:  failedNames,
+					err:          lastError,
+				}
+			}
+			// 全部失败
+			return containerOperationErrorMsg{
+				operation: opName + "容器",
+				container: strings.Join(failedNames, ", "),
+				err:       lastError,
+			}
+		}
+
+		// 全部成功
+		if len(containers) == 1 {
+			return containerOperationSuccessMsg{
+				operation: opName,
+				container: containers[0].Name,
+			}
+		}
+		return containerBatchOperationMsg{
+			operation:    opName,
+			successCount: successCount,
+			failedCount:  0,
+		}
+	}
+}
+
+// updateTableData 更新表格数据（不重新计算列宽）
+func (v *ContainerListView) updateTableData() {
+	if v.scrollTable == nil || len(v.filteredContainers) == 0 {
+		return
+	}
+
+	rows := make([]TableRow, len(v.filteredContainers))
+	
+	// 定义整行颜色样式
+	exitedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	pausedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	unhealthyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	
+	for i, c := range v.filteredContainers {
+		created := formatCreatedTime(c.Created)
+		ports := c.Ports
+		if ports == "" {
+			ports = "-"
+		}
+		
+		// 选择标记
+		selMark := " "
+		if v.selectedContainers[c.ID] {
+			selMark = selectedStyle.Render("✓")
+		}
+		
+		// 根据状态决定是否对整行应用颜色
+		var rowStyle lipgloss.Style
+		var needsStyle bool
+		
+		switch {
+		case strings.Contains(strings.ToLower(c.Status), "unhealthy"):
+			rowStyle = unhealthyStyle
+			needsStyle = true
+		case c.State == "paused":
+			rowStyle = pausedStyle
+			needsStyle = true
+		case c.State == "exited":
+			rowStyle = exitedStyle
+			needsStyle = true
+		default:
+			needsStyle = false
+		}
+		
+		// 构建行数据
+		if needsStyle {
+			rows[i] = TableRow{
+				selMark,
+				rowStyle.Render(c.ShortID),
+				rowStyle.Render(c.Name),
+				rowStyle.Render(c.Image),
+				rowStyle.Render(c.Command),
+				rowStyle.Render(created),
+				rowStyle.Render(c.Status),
+				rowStyle.Render(ports),
+			}
+		} else {
+			rows[i] = TableRow{
+				selMark,
+				c.ShortID,
+				c.Name,
+				c.Image,
+				c.Command,
+				created,
+				c.Status,
+				ports,
+			}
+		}
+	}
+	v.scrollTable.SetRows(rows)
+}
+
+// GetSelectedCount 获取选中的容器数量
+func (v *ContainerListView) GetSelectedCount() int {
+	return len(v.selectedContainers)
 }

@@ -411,6 +411,15 @@ func (v *NetworkListView) handleNormalKey(msg tea.KeyMsg) (View, tea.Cmd) {
 	case "i":
 		// 检查网络（显示 JSON）
 		return v, v.inspectNetwork()
+	case "enter":
+		// 查看网络详情 - 发送消息给父视图
+		network := v.GetSelectedNetwork()
+		if network == nil {
+			return v, nil
+		}
+		return v, func() tea.Msg {
+			return ViewNetworkDetailsMsg{Network: network}
+		}
 	case "s":
 		// 切换排序
 		v.cycleSortField()
@@ -933,30 +942,7 @@ func (v *NetworkListView) inspectNetwork() tea.Cmd {
 
 // overlayDialog 叠加对话框
 func (v *NetworkListView) overlayDialog(baseContent string) string {
-	lines := strings.Split(baseContent, "\n")
-	dialogContent := v.renderConfirmDialogContent()
-	dialogLines := strings.Split(dialogContent, "\n")
-	dialogHeight := len(dialogLines)
-
-	insertLine := 0
-	if len(lines) > dialogHeight {
-		insertLine = (len(lines) - dialogHeight) / 2
-	}
-
-	var result strings.Builder
-	for i := 0; i < len(lines); i++ {
-		dialogIdx := i - insertLine
-		if dialogIdx >= 0 && dialogIdx < len(dialogLines) {
-			result.WriteString(dialogLines[dialogIdx])
-		} else if i < len(lines) {
-			result.WriteString(lines[i])
-		}
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.renderConfirmDialogContent(), v.width, v.height)
 }
 
 // renderConfirmDialogContent 渲染确认对话框内容
@@ -1025,32 +1011,14 @@ func (v *NetworkListView) HasError() bool {
 	return v.errorDialog != nil && v.errorDialog.IsVisible()
 }
 
+// IsShowingJSONViewer 返回是否正在显示 JSON 查看器
+func (v *NetworkListView) IsShowingJSONViewer() bool {
+	return v.jsonViewer != nil && v.jsonViewer.IsVisible()
+}
+
 // overlayFilterMenu 叠加筛选菜单
 func (v *NetworkListView) overlayFilterMenu(baseContent string) string {
-	lines := strings.Split(baseContent, "\n")
-	menuContent := v.renderFilterMenuContent()
-	menuLines := strings.Split(menuContent, "\n")
-	menuHeight := len(menuLines)
-
-	insertLine := 0
-	if len(lines) > menuHeight {
-		insertLine = (len(lines) - menuHeight) / 2
-	}
-
-	var result strings.Builder
-	for i := 0; i < len(lines); i++ {
-		menuIdx := i - insertLine
-		if menuIdx >= 0 && menuIdx < len(menuLines) {
-			result.WriteString(menuLines[menuIdx])
-		} else if i < len(lines) {
-			result.WriteString(lines[i])
-		}
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.renderFilterMenuContent(), v.width, v.height)
 }
 
 // renderFilterMenuContent 渲染筛选菜单内容

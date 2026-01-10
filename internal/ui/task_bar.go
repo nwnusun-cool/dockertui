@@ -41,6 +41,10 @@ var (
 	taskBarSuccessStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("82"))
 
+	taskBarCancelStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196")).
+		Bold(true)
+
 	taskBarBoxStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -75,6 +79,25 @@ func (t *TaskBar) IsExpanded() bool {
 // HasActiveTasks 是否有活跃任务
 func (t *TaskBar) HasActiveTasks() bool {
 	return len(t.manager.ListActiveTasks()) > 0
+}
+
+// CancelFirstTask 取消第一个活跃任务
+func (t *TaskBar) CancelFirstTask() bool {
+	tasks := t.manager.ListActiveTasks()
+	if len(tasks) == 0 {
+		return false
+	}
+	t.manager.Cancel(tasks[0].ID())
+	return true
+}
+
+// CancelAllTasks 取消所有活跃任务
+func (t *TaskBar) CancelAllTasks() int {
+	tasks := t.manager.ListActiveTasks()
+	for _, tsk := range tasks {
+		t.manager.Cancel(tsk.ID())
+	}
+	return len(tasks)
 }
 
 // Update 处理消息
@@ -153,7 +176,7 @@ func (t *TaskBar) renderCollapsed(tasks []task.Task, width int) string {
 	}
 
 	// 展开提示
-	line += "  " + taskBarHintStyle.Render("[T=展开]")
+	line += "  " + taskBarHintStyle.Render("[T=展开]") + " " + taskBarCancelStyle.Render("[x=取消]")
 
 	// 分隔线
 	separator := taskBarLineStyle.Render(strings.Repeat("─", width))
@@ -167,7 +190,7 @@ func (t *TaskBar) renderExpanded(tasks []task.Task, width int) string {
 
 	// 标题
 	title := taskBarIconStyle.Render(fmt.Sprintf("后台任务 (%d)", len(tasks))) +
-		"  " + taskBarHintStyle.Render("[T=收起]")
+		"  " + taskBarHintStyle.Render("[T=收起]") + " " + taskBarCancelStyle.Render("[x=取消]")
 	lines = append(lines, title)
 
 	// 分隔线

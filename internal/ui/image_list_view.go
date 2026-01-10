@@ -117,6 +117,12 @@ type ImageListView struct {
 
 	// JSON 查看器
 	jsonViewer *JSONViewer // JSON 查看器
+
+	// 多选功能
+	selectedImages map[string]bool // 已选中的镜像 ID
+
+	// 导出功能
+	exportInput *ExportInputView // 导出输入视图
 }
 
 // NewImageListView 创建镜像列表视图
@@ -152,6 +158,7 @@ func NewImageListView(dockerClient docker.Client) *ImageListView {
 
 	// 创建可滚动表格
 	scrollColumns := []TableColumn{
+		{Title: "SEL", Width: 3},  // 选择列
 		{Title: "IMAGE ID", Width: 14},
 		{Title: "REPOSITORY", Width: 35},
 		{Title: "TAG", Width: 25},
@@ -161,19 +168,21 @@ func NewImageListView(dockerClient docker.Client) *ImageListView {
 	scrollTable := NewScrollableTable(scrollColumns)
 
 	return &ImageListView{
-		dockerClient: dockerClient,
-		tableModel:   t,
-		scrollTable:  scrollTable,
-		keys:         DefaultKeyMap(),
-		searchQuery:  "",
-		isSearching:  false,
-		filterType:   "all",
-		sortBy:       "created",
-		pullInput:    NewPullInputView(),
-		taskBar:      NewTaskBar(),
-		tagInput:     NewTagInputView(),
-		errorDialog:  NewErrorDialog(),
-		jsonViewer:   NewJSONViewer(),
+		dockerClient:   dockerClient,
+		tableModel:     t,
+		scrollTable:    scrollTable,
+		keys:           DefaultKeyMap(),
+		searchQuery:    "",
+		isSearching:    false,
+		filterType:     "all",
+		sortBy:         "created",
+		pullInput:      NewPullInputView(),
+		taskBar:        NewTaskBar(),
+		tagInput:       NewTagInputView(),
+		errorDialog:    NewErrorDialog(),
+		jsonViewer:     NewJSONViewer(),
+		selectedImages: make(map[string]bool),
+		exportInput:    NewExportInputView(),
 	}
 }
 
@@ -185,6 +194,19 @@ func (v *ImageListView) Init() tea.Cmd {
 
 // Update 处理消息并更新视图状态
 func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
+	// 如果显示导出输入视图，优先处理
+	if v.exportInput != nil && v.exportInput.IsVisible() {
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			wasVisible := v.exportInput.IsVisible()
+			v.exportInput.Update(keyMsg)
+			// 如果导出输入视图刚刚关闭且有任务启动，开始监听事件
+			if wasVisible && !v.exportInput.IsVisible() && v.taskBar.HasActiveTasks() {
+				return v, v.taskBar.ListenForEvents()
+			}
+			return v, nil
+		}
+	}
+
 	// 如果显示 JSON 查看器，优先处理
 	if v.jsonViewer != nil && v.jsonViewer.IsVisible() {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -261,6 +283,25 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		}
 		return v, nil
 
+	case imageExportSuccessMsg:
+		v.successMsg = fmt.Sprintf("✅ 成功导出 %d 个镜像到 %s", msg.count, msg.dir)
+		v.successMsgTime = time.Now()
+		// 清除选择
+		v.selectedImages = make(map[string]bool)
+		v.updateTableData()
+		return v, v.clearSuccessMessageAfter(5 * time.Second)
+
+	case imageExportErrorMsg:
+		if v.errorDialog != nil {
+			v.errorDialog.ShowError(fmt.Sprintf("导出镜像失败: %v", msg.err))
+		}
+		return v, nil
+
+	case imageExportProgressMsg:
+		v.successMsg = fmt.Sprintf("⏳ 正在导出 [%d/%d]: %s", msg.current, msg.total, msg.name)
+		v.successMsgTime = time.Now()
+		return v, nil
+
 	case TaskEventMsg:
 		// 处理任务事件
 		event := msg.Event
@@ -281,6 +322,14 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 				v.errorDialog.ShowError(errMsg)
 			}
 			return v, v.taskBar.ListenForEvents()
+		case task.EventCancelled:
+			// 任务已取消
+			v.successMsg = fmt.Sprintf("⏹️ %s 已取消", event.TaskName)
+			v.successMsgTime = time.Now()
+			return v, tea.Batch(
+				v.clearSuccessMessageAfter(3*time.Second),
+				v.taskBar.ListenForEvents(),
+			)
 		case task.EventProgress, task.EventStarted:
 			// 进度更新或任务开始，继续监听
 			// 不需要做任何事情，View() 会自动从 TaskBar 获取最新状态
@@ -551,15 +600,14 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 			}
 			return v, nil
 		case "enter":
-			// 查看镜像详情
+			// 查看镜像详情 - 发送消息给父视图
 			image := v.GetSelectedImage()
 			if image == nil {
 				return v, nil
 			}
-			// TODO: 实现镜像详情视图
-			v.successMsg = "⚠️ 镜像详情功能开发中..."
-			v.successMsgTime = time.Now()
-			return v, v.clearSuccessMessageAfter(2 * time.Second)
+			return v, func() tea.Msg {
+				return ViewImageDetailsMsg{Image: image}
+			}
 		case "d":
 			// 删除镜像
 			return v, v.showRemoveConfirmDialog()
@@ -581,6 +629,51 @@ func (v *ImageListView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case "i":
 			// 检查镜像（显示 JSON）
 			return v, v.inspectImage()
+		case " ":
+			// 空格键：切换选择当前镜像
+			image := v.GetSelectedImage()
+			if image != nil {
+				if v.selectedImages[image.ID] {
+					delete(v.selectedImages, image.ID)
+				} else {
+					v.selectedImages[image.ID] = true
+				}
+				v.updateTableData()
+			}
+			return v, nil
+		case "a":
+			// 全选/取消全选
+			// 检查是否所有过滤后的镜像都已选中
+			allSelected := true
+			for _, img := range v.filteredImages {
+				if !v.selectedImages[img.ID] {
+					allSelected = false
+					break
+				}
+			}
+			if allSelected && len(v.filteredImages) > 0 {
+				// 已全选，取消全选
+				v.selectedImages = make(map[string]bool)
+			} else {
+				// 全选
+				for _, img := range v.filteredImages {
+					v.selectedImages[img.ID] = true
+				}
+			}
+			v.updateTableData()
+			return v, nil
+		case "E":
+			// 导出镜像
+			return v, v.showExportDialog()
+		case "x":
+			// 取消当前任务
+			if v.taskBar.HasActiveTasks() {
+				v.taskBar.CancelFirstTask()
+				v.successMsg = "⏹️ 正在取消任务..."
+				v.successMsgTime = time.Now()
+				return v, v.clearSuccessMessageAfter(2 * time.Second)
+			}
+			return v, nil
 		}
 	}
 
@@ -713,6 +806,11 @@ func (v *ImageListView) View() string {
 		s = v.errorDialog.Overlay(s)
 	}
 
+	// 如果显示导出输入视图，叠加在内容上
+	if v.exportInput != nil && v.exportInput.IsVisible() {
+		s = v.overlayExportInput(s)
+	}
+
 	return s
 }
 
@@ -784,6 +882,10 @@ func (v *ImageListView) renderStatusBar() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
 
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("82")).
+		Bold(true)
+
 	makeItem := func(key, desc string) string {
 		return itemStyle.Render(keyStyle.Render(key) + descStyle.Render(" "+desc))
 	}
@@ -800,12 +902,12 @@ func (v *ImageListView) renderStatusBar() string {
 	row2Keys := makeItem("<d>", "Delete") + makeItem("<p>", "Prune") + makeItem("<P>", "Pull")
 	lines = append(lines, "  "+row2Label+row2Keys)
 
-	// 第三行：高级操作
+	// 第三行：高级操作（包含多选和导出）
 	row3Label := labelStyle.Render("Advanced:")
-	row3Keys := makeItem("<t>", "Tag") + makeItem("<u>", "Untag") + makeItem("<e>", "Export")
+	row3Keys := makeItem("<t>", "Tag") + makeItem("<Space>", "Select") + makeItem("<a>", "All") + makeItem("<E>", "Export")
 	lines = append(lines, "  "+row3Label+row3Keys)
 
-	// 第四行：刷新时间 + vim 提示
+	// 第四行：刷新时间 + vim 提示 + 选中数量
 	refreshInfo := "-"
 	if !v.lastRefreshTime.IsZero() {
 		refreshInfo = formatDuration(time.Since(v.lastRefreshTime)) + " ago"
@@ -814,6 +916,12 @@ func (v *ImageListView) renderStatusBar() string {
 	row4Label := labelStyle.Render("Last Refresh:")
 	row4Info := hintStyle.Render(refreshInfo) + "    " +
 		hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
+	
+	// 如果有选中的镜像，显示选中数量
+	if len(v.selectedImages) > 0 {
+		row4Info += "    " + selectedStyle.Render(fmt.Sprintf("[已选: %d]", len(v.selectedImages)))
+	}
+	
 	lines = append(lines, "  "+row4Label+row4Info)
 
 	return "\n" + strings.Join(lines, "\n") + "\n"
@@ -932,6 +1040,67 @@ func (v *ImageListView) applyFilters() {
 	}
 }
 
+// updateTableData 更新表格数据（不重新计算列宽）
+func (v *ImageListView) updateTableData() {
+	if v.scrollTable == nil || len(v.filteredImages) == 0 {
+		return
+	}
+
+	rows := make([]TableRow, len(v.filteredImages))
+	
+	// 定义整行颜色样式
+	danglingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	unusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	
+	for i, img := range v.filteredImages {
+		created := formatCreatedTime(img.Created)
+		size := formatSize(img.Size)
+		
+		// 选择标记
+		selMark := " "
+		if v.selectedImages[img.ID] {
+			selMark = selectedStyle.Render("✓")
+		}
+		
+		// 根据镜像状态决定是否对整行应用颜色
+		var rowStyle lipgloss.Style
+		var needsStyle bool
+		
+		if img.Dangling {
+			rowStyle = danglingStyle
+			needsStyle = true
+		} else if !img.InUse {
+			rowStyle = unusedStyle
+			needsStyle = true
+		} else {
+			needsStyle = false
+		}
+		
+		// 构建行数据
+		if needsStyle {
+			rows[i] = TableRow{
+				selMark,
+				rowStyle.Render(img.ShortID),
+				rowStyle.Render(img.Repository),
+				rowStyle.Render(img.Tag),
+				rowStyle.Render(size),
+				rowStyle.Render(created),
+			}
+		} else {
+			rows[i] = TableRow{
+				selMark,
+				img.ShortID,
+				img.Repository,
+				img.Tag,
+				size,
+				created,
+			}
+		}
+	}
+	v.scrollTable.SetRows(rows)
+}
+
 // 消息类型定义
 type imagesLoadedMsg struct {
 	images []docker.Image
@@ -948,6 +1117,23 @@ type imageInspectMsg struct {
 
 type imageInspectErrorMsg struct {
 	err error
+}
+
+// 导出相关消息
+type imageExportSuccessMsg struct {
+	count    int
+	dir      string
+	fileSize int64
+}
+
+type imageExportErrorMsg struct {
+	err error
+}
+
+type imageExportProgressMsg struct {
+	current int
+	total   int
+	name    string
 }
 
 // updateColumnWidths 根据实际数据计算并更新列宽
@@ -1035,6 +1221,7 @@ func (v *ImageListView) updateColumnWidths() {
 	// 更新可滚动表格的列宽和数据
 	if v.scrollTable != nil {
 		v.scrollTable.SetColumns([]TableColumn{
+			{Title: "SEL", Width: 3},  // 选择列
 			{Title: "IMAGE ID", Width: maxID + 2},
 			{Title: "REPOSITORY", Width: maxRepository + 2},
 			{Title: "TAG", Width: maxTag + 2},
@@ -1049,10 +1236,17 @@ func (v *ImageListView) updateColumnWidths() {
 			// 定义整行颜色样式
 			danglingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 			unusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 			
 			for i, img := range v.filteredImages {
 				created := formatCreatedTime(img.Created)
 				size := formatSize(img.Size)
+				
+				// 选择标记
+				selMark := " "
+				if v.selectedImages[img.ID] {
+					selMark = selectedStyle.Render("✓")
+				}
 				
 				// 根据镜像状态决定是否对整行应用颜色
 				var rowStyle lipgloss.Style
@@ -1071,6 +1265,7 @@ func (v *ImageListView) updateColumnWidths() {
 				// 构建行数据
 				if needsStyle {
 					rows[i] = TableRow{
+						selMark,
 						rowStyle.Render(img.ShortID),
 						rowStyle.Render(img.Repository),
 						rowStyle.Render(img.Tag),
@@ -1079,6 +1274,7 @@ func (v *ImageListView) updateColumnWidths() {
 					}
 				} else {
 					rows[i] = TableRow{
+						selMark,
 						img.ShortID,
 						img.Repository,
 						img.Tag,
@@ -1219,78 +1415,12 @@ func (v *ImageListView) inspectImage() tea.Cmd {
 
 // overlayPullInput 将拉取输入框叠加到现有内容上（居中显示）
 func (v *ImageListView) overlayPullInput(baseContent string) string {
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-
-	// 获取输入框内容
-	inputContent := v.pullInput.View()
-	inputLines := strings.Split(inputContent, "\n")
-	inputHeight := len(inputLines)
-
-	// 计算输入框应该插入的位置（垂直居中）
-	insertLine := 0
-	if len(lines) > inputHeight {
-		insertLine = (len(lines) - inputHeight) / 2
-	}
-
-	// 构建最终输出
-	var result strings.Builder
-
-	for i := 0; i < len(lines); i++ {
-		inputIdx := i - insertLine
-		if inputIdx >= 0 && inputIdx < len(inputLines) {
-			// 在这个位置显示输入框行
-			result.WriteString(inputLines[inputIdx])
-		} else if i < len(lines) {
-			// 显示原始内容
-			result.WriteString(lines[i])
-		}
-
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.pullInput.View(), v.width, v.height)
 }
 
 // overlayDialog 将对话框叠加到现有内容上（居中显示）
 func (v *ImageListView) overlayDialog(baseContent string) string {
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-
-	// 对话框尺寸
-	dialogHeight := 9
-
-	// 计算对话框应该插入的位置（垂直居中）
-	insertLine := 0
-	if len(lines) > dialogHeight {
-		insertLine = (len(lines) - dialogHeight) / 2
-	}
-
-	// 获取对话框内容
-	dialogContent := v.renderConfirmDialogContent()
-	dialogLines := strings.Split(dialogContent, "\n")
-
-	// 构建最终输出
-	var result strings.Builder
-
-	for i := 0; i < len(lines); i++ {
-		dialogIdx := i - insertLine
-		if dialogIdx >= 0 && dialogIdx < len(dialogLines) {
-			// 在这个位置显示对话框行
-			result.WriteString(dialogLines[dialogIdx])
-		} else if i < len(lines) {
-			// 显示原始内容
-			result.WriteString(lines[i])
-		}
-
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.renderConfirmDialogContent(), v.width, v.height)
 }
 
 // renderConfirmDialogContent 渲染对话框内容
@@ -1591,39 +1721,7 @@ func (v *ImageListView) showTagInput() tea.Cmd {
 
 // overlayTagInput 将打标签输入框叠加到现有内容上（居中显示）
 func (v *ImageListView) overlayTagInput(baseContent string) string {
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-
-	// 获取输入框内容
-	inputContent := v.tagInput.View()
-	inputLines := strings.Split(inputContent, "\n")
-	inputHeight := len(inputLines)
-
-	// 计算输入框应该插入的位置（垂直居中）
-	insertLine := 0
-	if len(lines) > inputHeight {
-		insertLine = (len(lines) - inputHeight) / 2
-	}
-
-	// 构建最终输出
-	var result strings.Builder
-
-	for i := 0; i < len(lines); i++ {
-		inputIdx := i - insertLine
-		if inputIdx >= 0 && inputIdx < len(inputLines) {
-			// 在这个位置显示输入框行
-			result.WriteString(inputLines[inputIdx])
-		} else if i < len(lines) {
-			// 显示原始内容
-			result.WriteString(lines[i])
-		}
-
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, v.tagInput.View(), v.width, v.height)
 }
 
 // tagImage 执行打标签操作
@@ -1655,4 +1753,108 @@ func (v *ImageListView) tagImage(sourceImageID, repository, tag string) tea.Cmd 
 // HasError 返回是否有错误弹窗显示
 func (v *ImageListView) HasError() bool {
 	return v.errorDialog != nil && v.errorDialog.IsVisible()
+}
+
+// IsShowingJSONViewer 返回是否正在显示 JSON 查看器
+func (v *ImageListView) IsShowingJSONViewer() bool {
+	return v.jsonViewer != nil && v.jsonViewer.IsVisible()
+}
+
+// showExportDialog 显示导出对话框
+func (v *ImageListView) showExportDialog() tea.Cmd {
+	// 获取要导出的镜像列表
+	var images []ExportImageInfo
+
+	if len(v.selectedImages) > 0 {
+		// 有多选，导出选中的镜像
+		for _, img := range v.filteredImages {
+			if v.selectedImages[img.ID] {
+				images = append(images, ExportImageInfo{
+					ID:         img.ID,
+					Repository: img.Repository,
+					Tag:        img.Tag,
+				})
+			}
+		}
+	} else {
+		// 没有多选，导出当前选中的镜像
+		img := v.GetSelectedImage()
+		if img != nil {
+			images = append(images, ExportImageInfo{
+				ID:         img.ID,
+				Repository: img.Repository,
+				Tag:        img.Tag,
+			})
+		}
+	}
+
+	if len(images) == 0 {
+		v.successMsg = "⚠️ 请先选择要导出的镜像"
+		v.successMsgTime = time.Now()
+		return v.clearSuccessMessageAfter(2 * time.Second)
+	}
+
+	// 显示导出输入视图
+	v.exportInput.SetWidth(v.width)
+	v.exportInput.Show(images)
+	v.exportInput.SetCallbacks(
+		func(dir string, mode ExportMode, compress bool) {
+			// 确认导出 - 使用任务系统
+			v.startExportTask(images, dir, mode, compress)
+		},
+		func() {
+			// 取消
+		},
+	)
+
+	return nil
+}
+
+// startExportTask 启动导出任务
+func (v *ImageListView) startExportTask(images []ExportImageInfo, dir string, mode ExportMode, compress bool) {
+	// 转换为 task 包的类型
+	taskImages := make([]task.ExportImageInfo, len(images))
+	for i, img := range images {
+		taskImages[i] = task.ExportImageInfo{
+			ID:         img.ID,
+			Repository: img.Repository,
+			Tag:        img.Tag,
+		}
+	}
+
+	// 转换导出模式
+	taskMode := task.ExportModeSingle
+	if mode == ExportModeMultiple {
+		taskMode = task.ExportModeMultiple
+	}
+
+	// 创建导出任务
+	exportTask := task.NewExportTask(v.dockerClient, taskImages, dir, taskMode, compress)
+
+	// 提交到任务管理器
+	manager := task.GetManager()
+	manager.Submit(exportTask)
+
+	// 显示开始消息
+	v.successMsg = fmt.Sprintf("📤 开始导出 %d 个镜像到 %s", len(images), dir)
+	v.successMsgTime = time.Now()
+
+	// 清除选择
+	v.selectedImages = make(map[string]bool)
+	v.updateTableData()
+}
+
+// GetSelectedCount 获取选中的镜像数量
+func (v *ImageListView) GetSelectedCount() int {
+	return len(v.selectedImages)
+}
+
+// IsShowingExportInput 返回是否正在显示导出输入视图
+func (v *ImageListView) IsShowingExportInput() bool {
+	return v.exportInput != nil && v.exportInput.IsVisible()
+}
+
+// overlayExportInput 将导出输入视图叠加到现有内容上（居中显示）
+func (v *ImageListView) overlayExportInput(baseContent string) string {
+	return OverlayCentered(baseContent, v.exportInput.View(), v.width, v.height)
 }

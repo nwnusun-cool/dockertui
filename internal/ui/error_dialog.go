@@ -141,48 +141,5 @@ func (d *ErrorDialog) Overlay(baseContent string) string {
 	if !d.visible {
 		return baseContent
 	}
-
-	// 将基础内容按行分割
-	lines := strings.Split(baseContent, "\n")
-
-	// 获取弹窗内容
-	dialog := d.View()
-	dialogLines := strings.Split(dialog, "\n")
-
-	// 计算弹窗位置（垂直居中）
-	dialogHeight := len(dialogLines)
-	insertLine := 0
-	if len(lines) > dialogHeight {
-		insertLine = (len(lines) - dialogHeight) / 2
-	}
-
-	// 计算水平居中的 padding
-	boxWidth := d.width - 10
-	if boxWidth < 50 {
-		boxWidth = 50
-	}
-	if boxWidth > 80 {
-		boxWidth = 80
-	}
-	leftPadding := 0
-	if d.width > boxWidth+4 {
-		leftPadding = (d.width - boxWidth - 4) / 2
-	}
-
-	// 构建最终输出
-	var result strings.Builder
-	for i := 0; i < len(lines); i++ {
-		dialogIdx := i - insertLine
-		if dialogIdx >= 0 && dialogIdx < len(dialogLines) {
-			result.WriteString(strings.Repeat(" ", leftPadding))
-			result.WriteString(dialogLines[dialogIdx])
-		} else if i < len(lines) {
-			result.WriteString(lines[i])
-		}
-		if i < len(lines)-1 {
-			result.WriteString("\n")
-		}
-	}
-
-	return result.String()
+	return OverlayCentered(baseContent, d.View(), d.width, 0)
 }

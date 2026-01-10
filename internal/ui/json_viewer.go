@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"docktui/internal/ui/search"
 )
 
 // JSON 查看器样式
@@ -39,6 +41,26 @@ var (
 
 	jsonViewerHintStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
+
+	// 搜索相关样式
+	jsonSearchPromptStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220")).
+		Bold(true)
+
+	jsonSearchMatchStyle = lipgloss.NewStyle().
+		Background(lipgloss.Color("226")).
+		Foreground(lipgloss.Color("0"))
+
+	jsonSearchCurrentStyle = lipgloss.NewStyle().
+		Background(lipgloss.Color("208")).
+		Foreground(lipgloss.Color("0")).
+		Bold(true)
+
+	jsonSearchInfoStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245"))
+
+	jsonSearchNoMatchStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("196"))
 )
 
 // JSONViewer JSON 查看器组件
@@ -58,6 +80,11 @@ type JSONViewer struct {
 	// 可见性
 	visible bool
 
+	// 搜索相关
+	searcher    *search.TextSearcher
+	isSearching bool   // 是否处于搜索输入模式
+	searchInput string // 搜索输入框内容
+
 	// 回调
 	onClose func()
 }
@@ -65,7 +92,8 @@ type JSONViewer struct {
 // NewJSONViewer 创建 JSON 查看器
 func NewJSONViewer() *JSONViewer {
 	return &JSONViewer{
-		visible: false,
+		visible:  false,
+		searcher: search.NewTextSearcher(),
 	}
 }
 
@@ -77,12 +105,17 @@ func (v *JSONViewer) Show(title, content string) {
 	v.scrollY = 0
 	v.scrollX = 0
 	v.visible = true
+	v.isSearching = false
+	v.searchInput = ""
+	v.searcher.Clear()
 	v.updateMaxScroll()
 }
 
 // Hide 隐藏查看器
 func (v *JSONViewer) Hide() {
 	v.visible = false
+	v.isSearching = false
+	v.searcher.Clear()
 }
 
 // IsVisible 检查是否可见
@@ -129,17 +162,64 @@ func (v *JSONViewer) updateMaxScroll() {
 	}
 }
 
+// scrollToLine 滚动到指定行
+func (v *JSONViewer) scrollToLine(lineIdx int) {
+	visibleLines := v.height - 6
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+
+	// 将目标行滚动到视图中央
+	targetScroll := lineIdx - visibleLines/2
+	if targetScroll < 0 {
+		targetScroll = 0
+	}
+	if targetScroll > v.maxScrollY {
+		targetScroll = v.maxScrollY
+	}
+	v.scrollY = targetScroll
+}
+
 // Update 处理按键
 func (v *JSONViewer) Update(msg tea.KeyMsg) bool {
 	if !v.visible {
 		return false
 	}
 
+	// 搜索输入模式
+	if v.isSearching {
+		return v.handleSearchInput(msg)
+	}
+
+	// 普通模式
 	switch msg.String() {
 	case "esc", "q", "i":
+		// 如果有搜索结果，先清除搜索
+		if v.searcher.HasMatches() {
+			v.searcher.Clear()
+			v.searchInput = ""
+			return true
+		}
 		v.Hide()
 		if v.onClose != nil {
 			v.onClose()
+		}
+		return true
+	case "/":
+		// 进入搜索模式
+		v.isSearching = true
+		v.searchInput = ""
+		return true
+	case "n":
+		// 下一个匹配
+		if match := v.searcher.Next(); match != nil {
+			v.scrollToLine(match.Line)
+		}
+		return true
+	case "N":
+		// 上一个匹配
+		if match := v.searcher.Prev(); match != nil {
+			v.scrollToLine(match.Line)
 		}
 		return true
 	case "j", "down":
@@ -188,6 +268,40 @@ func (v *JSONViewer) Update(msg tea.KeyMsg) bool {
 	return false
 }
 
+// handleSearchInput 处理搜索输入模式的按键
+func (v *JSONViewer) handleSearchInput(msg tea.KeyMsg) bool {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// 取消搜索
+		v.isSearching = false
+		v.searchInput = ""
+		return true
+	case tea.KeyEnter:
+		// 确认搜索
+		v.isSearching = false
+		if v.searchInput != "" {
+			v.searcher.Search(v.lines, v.searchInput)
+			// 跳转到第一个匹配
+			if match := v.searcher.Current(); match != nil {
+				v.scrollToLine(match.Line)
+			}
+		}
+		return true
+	case tea.KeyBackspace:
+		if len(v.searchInput) > 0 {
+			v.searchInput = v.searchInput[:len(v.searchInput)-1]
+		}
+		return true
+	case tea.KeyRunes:
+		v.searchInput += string(msg.Runes)
+		return true
+	case tea.KeySpace:
+		v.searchInput += " "
+		return true
+	}
+	return true
+}
+
 // View 渲染视图
 func (v *JSONViewer) View() string {
 	if !v.visible {
@@ -214,23 +328,31 @@ func (v *JSONViewer) View() string {
 
 	// 渲染可见行
 	for i := 0; i < visibleLines && i+v.scrollY < len(v.lines); i++ {
-		lineNum := i + v.scrollY + 1
-		line := v.lines[i+v.scrollY]
+		lineIdx := i + v.scrollY
+		lineNum := lineIdx + 1
+		line := v.lines[lineIdx]
 
 		// 水平滚动
+		displayLine := line
 		if v.scrollX > 0 && len(line) > v.scrollX {
-			line = line[v.scrollX:]
+			displayLine = line[v.scrollX:]
 		} else if v.scrollX > 0 {
-			line = ""
+			displayLine = ""
 		}
 
 		// 截断过长的行
-		if len(line) > visibleWidth {
-			line = line[:visibleWidth-3] + "..."
+		if len(displayLine) > visibleWidth {
+			displayLine = displayLine[:visibleWidth-3] + "..."
 		}
 
-		// 语法高亮
-		coloredLine := v.colorize(line)
+		// 语法高亮（如果没有搜索匹配）
+		var coloredLine string
+		if v.searcher.HasMatches() && v.searcher.IsLineMatched(lineIdx) {
+			// 有搜索匹配，使用搜索高亮
+			coloredLine = v.highlightSearchMatches(line, lineIdx, v.scrollX, visibleWidth)
+		} else {
+			coloredLine = v.colorize(displayLine)
+		}
 
 		// 行号 + 内容
 		lineNumStr := jsonViewerLineNumStyle.Render(strconv.Itoa(lineNum))
@@ -240,20 +362,120 @@ func (v *JSONViewer) View() string {
 	// 底部分隔线
 	s.WriteString("  " + strings.Repeat("─", v.width-6) + "\n")
 
-	// 滚动信息和快捷键提示
-	scrollInfo := ""
-	if v.maxScrollY > 0 {
-		percent := 0
-		if v.maxScrollY > 0 {
-			percent = v.scrollY * 100 / v.maxScrollY
-		}
-		scrollInfo = jsonViewerHintStyle.Render(strconv.Itoa(percent) + "%")
-	}
-
-	hints := jsonViewerHintStyle.Render("j/k=上下  g/G=首尾  Ctrl+D/U=翻页  h/l=左右  ESC/q=关闭")
-	s.WriteString("  " + hints + "  " + scrollInfo + "\n")
+	// 底部状态栏
+	s.WriteString(v.renderStatusBar())
 
 	return s.String()
+}
+
+// renderStatusBar 渲染底部状态栏
+func (v *JSONViewer) renderStatusBar() string {
+	var status string
+
+	if v.isSearching {
+		// 搜索输入模式
+		cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
+		status = "  " + jsonSearchPromptStyle.Render("/") + v.searchInput + cursor +
+			"  " + jsonSearchInfoStyle.Render("[Enter=确认 ESC=取消]") + "\n"
+	} else if v.searcher.HasMatches() {
+		// 显示搜索结果
+		matchInfo := jsonSearchInfoStyle.Render(
+			"[" + strconv.Itoa(v.searcher.CurrentIndex()) + "/" +
+				strconv.Itoa(v.searcher.MatchCount()) + "]")
+		status = "  " + jsonSearchPromptStyle.Render("/"+v.searcher.Query()) + " " + matchInfo +
+			"  " + jsonViewerHintStyle.Render("n=下一个 N=上一个 ESC=清除") + "\n"
+	} else if v.searchInput != "" && !v.searcher.HasMatches() {
+		// 无匹配结果
+		status = "  " + jsonSearchNoMatchStyle.Render("未找到: "+v.searchInput) +
+			"  " + jsonViewerHintStyle.Render("ESC=清除") + "\n"
+	} else {
+		// 普通模式
+		scrollInfo := ""
+		if v.maxScrollY > 0 {
+			percent := 0
+			if v.maxScrollY > 0 {
+				percent = v.scrollY * 100 / v.maxScrollY
+			}
+			scrollInfo = jsonViewerHintStyle.Render(strconv.Itoa(percent) + "%")
+		}
+		hints := jsonViewerHintStyle.Render("j/k=上下  g/G=首尾  /=搜索  n/N=跳转  ESC/q=关闭")
+		status = "  " + hints + "  " + scrollInfo + "\n"
+	}
+
+	return status
+}
+
+// highlightSearchMatches 高亮显示搜索匹配
+func (v *JSONViewer) highlightSearchMatches(line string, lineIdx int, scrollX int, visibleWidth int) string {
+	matches := v.searcher.GetLineMatches(lineIdx)
+	if len(matches) == 0 {
+		// 无匹配，使用普通语法高亮
+		displayLine := line
+		if scrollX > 0 && len(line) > scrollX {
+			displayLine = line[scrollX:]
+		} else if scrollX > 0 {
+			displayLine = ""
+		}
+		if len(displayLine) > visibleWidth {
+			displayLine = displayLine[:visibleWidth-3] + "..."
+		}
+		return v.colorize(displayLine)
+	}
+
+	// 构建高亮后的行
+	var result strings.Builder
+	currentMatch := v.searcher.Current()
+	pos := 0
+
+	for _, m := range matches {
+		// 调整位置以适应水平滚动
+		matchStart := m.Column - scrollX
+		matchEnd := matchStart + m.Length
+
+		// 跳过不可见的匹配
+		if matchEnd <= 0 || matchStart >= visibleWidth {
+			continue
+		}
+
+		// 调整边界
+		if matchStart < 0 {
+			matchStart = 0
+		}
+		if matchEnd > visibleWidth {
+			matchEnd = visibleWidth
+		}
+
+		// 添加匹配前的文本
+		if matchStart > pos {
+			beforeText := line[scrollX+pos : scrollX+matchStart]
+			result.WriteString(v.colorize(beforeText))
+		}
+
+		// 添加高亮的匹配文本
+		matchText := line[scrollX+matchStart : scrollX+matchEnd]
+		if currentMatch != nil && currentMatch.Line == lineIdx && currentMatch.Column == m.Column {
+			// 当前匹配用更醒目的颜色
+			result.WriteString(jsonSearchCurrentStyle.Render(matchText))
+		} else {
+			result.WriteString(jsonSearchMatchStyle.Render(matchText))
+		}
+
+		pos = matchEnd
+	}
+
+	// 添加剩余文本
+	if pos < visibleWidth && scrollX+pos < len(line) {
+		endPos := visibleWidth
+		if scrollX+endPos > len(line) {
+			endPos = len(line) - scrollX
+		}
+		if pos < endPos {
+			remainingText := line[scrollX+pos : scrollX+endPos]
+			result.WriteString(v.colorize(remainingText))
+		}
+	}
+
+	return result.String()
 }
 
 // colorize 对 JSON 行进行语法高亮
@@ -262,7 +484,6 @@ func (v *JSONViewer) colorize(line string) string {
 	result := line
 
 	// 处理键名（"key":）
-	inString := false
 	var colored strings.Builder
 	i := 0
 
@@ -290,7 +511,6 @@ func (v *JSONViewer) colorize(line string) string {
 				// 字符串值
 				colored.WriteString(jsonViewerStringStyle.Render(str))
 			}
-			inString = !inString
 			continue
 		}
 

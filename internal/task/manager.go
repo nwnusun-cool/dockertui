@@ -97,9 +97,9 @@ func (m *Manager) Submit(task Task) string {
 func (m *Manager) runTask(task Task) {
 	ctx, cancel := context.WithCancel(context.Background())
 	
-	// 设置取消函数（如果任务支持）
-	if bt, ok := task.(*PullTask); ok {
-		bt.BaseTask.SetCancelFunc(cancel)
+	// 设置取消函数（通过接口检查）
+	if cancellable, ok := task.(interface{ SetCancelFunc(context.CancelFunc) }); ok {
+		cancellable.SetCancelFunc(cancel)
 	}
 
 	err := task.Run(ctx)
