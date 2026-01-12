@@ -316,6 +316,11 @@ type LocalClient struct {
 	networkCli *network.Client // 网络操作客户端
 }
 
+// GetSDKClient 返回底层的 Docker SDK 客户端
+func (c *LocalClient) GetSDKClient() *sdk.Client {
+	return c.cli
+}
+
 // NewLocalClientFromEnv 基于环境变量创建本地 Docker 客户端，并开启 API 版本协商。
 func NewLocalClientFromEnv() (*LocalClient, error) {
 	cli, err := sdk.NewClientWithOpts(

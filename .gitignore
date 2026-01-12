@@ -1,0 +1,25 @@
+# Binaries
+*.exe
+docktui
+docktui-*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# AI/Editor tools
+.claude/
+.kiro/
+
+# Temp
+tmp/
+*.tmp

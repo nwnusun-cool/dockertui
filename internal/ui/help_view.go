@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"docktui/internal/docker"
+	"docktui/internal/ui/components"
 )
 
 var (
@@ -51,7 +52,7 @@ type HelpView struct {
 	
 	// 帮助组件
 	help help.Model
-	keys KeyMap
+	keys components.KeyMap
 }
 
 // helpSection 帮助章节
@@ -74,7 +75,7 @@ func NewHelpView(dockerClient docker.Client) *HelpView {
 	return &HelpView{
 		dockerClient: dockerClient,
 		help:         h,
-		keys:         DefaultKeyMap(),
+		keys:         components.DefaultKeyMap(),
 	}
 }
 

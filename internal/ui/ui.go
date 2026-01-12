@@ -11,8 +11,14 @@ import (
 	
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	sdk "github.com/docker/docker/client"
 
 	"docktui/internal/compose"
+	"docktui/internal/ui/components"
+	composeui "docktui/internal/ui/compose"
+	containerui "docktui/internal/ui/container"
+	imageui "docktui/internal/ui/image"
+	networkui "docktui/internal/ui/network"
 	"docktui/internal/docker"
 )
 
@@ -71,6 +77,8 @@ const (
 	ViewNetworkList
 	// ViewNetworkDetail 网络详情视图
 	ViewNetworkDetail
+	// ViewComposeDetail Compose 项目详情视图
+	ViewComposeDetail
 )
 
 // View 接口定义了所有视图必须实现的方法
@@ -99,16 +107,17 @@ type Model struct {
 	
 	// 视图实例
 	homeView            *HomeView         // 首页导航视图
-	containerListView   View              // 容器列表视图
-	containerDetailView View              // 容器详情视图
-	logsView            View              // 日志视图
+	containerListView   *containerui.ListView   // 容器列表视图
+	containerDetailView *containerui.DetailView // 容器详情视图
+	logsView            *containerui.LogsView // 日志视图
 	helpView            View              // 帮助视图
-	composeListView     *ComposeListView  // Compose 项目列表视图
-	imageListView       *ImageListView    // 镜像列表视图
-	imageDetailsView    *ImageDetailsView // 镜像详情视图
-	networkListView     *NetworkListView  // 网络列表视图
-	networkDetailView   *NetworkDetailView // 网络详情视图
-	shellSelector       *ShellSelector    // Shell 选择器
+	composeListView     *composeui.ListView   // Compose 项目列表视图
+	imageListView       *imageui.ListView     // 镜像列表视图
+	imageDetailsView    *imageui.DetailsView  // 镜像详情视图
+	networkListView     *networkui.ListView   // 网络列表视图
+	networkDetailView   *networkui.DetailView // 网络详情视图
+	composeDetailView   *composeui.DetailView // Compose 项目详情视图
+	shellSelector       *components.ShellSelector // Shell 选择器
 	
 	// 全局状态字段
 	selectedContainerID string   // 当前选中的容器 ID
@@ -132,23 +141,29 @@ type Model struct {
 func NewModel(dockerClient docker.Client) Model {
 	// 初始化各个视图
 	homeView := NewHomeView(dockerClient)
-	containerListView := NewContainerListView(dockerClient)
-	containerDetailView := NewContainerDetailView(dockerClient)
-	logsView := NewLogsView(dockerClient)
+	containerListView := containerui.NewListView(dockerClient)
+	containerDetailView := containerui.NewDetailView(dockerClient)
+	logsView := containerui.NewLogsView(dockerClient)
 	helpView := NewHelpView(dockerClient)
-	imageListView := NewImageListView(dockerClient)
-	networkListView := NewNetworkListView(dockerClient)
+	imageListView := imageui.NewListView(dockerClient)
+	networkListView := networkui.NewListView(dockerClient)
 	
 	// 初始化 Compose 客户端和视图
-	var composeListView *ComposeListView
+	var composeListView *composeui.ListView
+	var composeDetailView *composeui.DetailView
 	composeClient, err := compose.NewClient()
 	if err == nil {
-		// 默认扫描当前目录
-		composeListView = NewComposeListView(composeClient, []string{"."})
+		// 获取 Docker SDK 客户端用于项目发现
+		var sdkClient *sdk.Client
+		if localClient, ok := dockerClient.(*docker.LocalClient); ok {
+			sdkClient = localClient.GetSDKClient()
+		}
+		composeListView = composeui.NewListView(composeClient, sdkClient)
+		composeDetailView = composeui.NewDetailView(composeClient)
 	}
 	
 	// 初始化 Shell 选择器
-	shellSelector := NewShellSelector(dockerClient)
+	shellSelector := components.NewShellSelector(dockerClient)
 	
 	return Model{
 		dockerClient:        dockerClient,
@@ -159,6 +174,7 @@ func NewModel(dockerClient docker.Client) Model {
 		logsView:            logsView,
 		helpView:            helpView,
 		composeListView:     composeListView,
+		composeDetailView:   composeDetailView,
 		imageListView:       imageListView,
 		networkListView:     networkListView,
 		shellSelector:       shellSelector,
@@ -359,15 +375,15 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case GoBackMsg:
+	case GoBackMsg, imageui.GoBackMsg, networkui.GoBackMsg, composeui.GoBackMsg:
 		// 视图请求返回上一级
 		return m.goBack()
 	
 	// ========== 视图切换请求消息 ==========
-	case ViewImageDetailsMsg:
+	case imageui.ViewImageDetailsMsg:
 		// 镜像列表视图请求切换到镜像详情
 		if msg.Image != nil {
-			m.imageDetailsView = NewImageDetailsView(m.dockerClient, msg.Image)
+			m.imageDetailsView = imageui.NewDetailsView(m.dockerClient, msg.Image)
 			m.imageDetailsView.SetSize(m.width, m.height)
 			m.previousView = m.currentView
 			m.currentView = ViewImageDetails
@@ -375,11 +391,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	
-	case ViewContainerDetailsMsg:
+	case containerui.ViewDetailsMsg:
 		// 容器列表视图请求切换到容器详情
 		m.selectedContainerID = msg.ContainerID
-		if detailView, ok := m.containerDetailView.(*ContainerDetailView); ok {
-			detailView.SetContainer(msg.ContainerID, msg.ContainerName)
+		if m.containerDetailView != nil {
+			m.containerDetailView.SetContainer(msg.ContainerID, msg.ContainerName)
 		}
 		m.previousView = m.currentView
 		m.currentView = ViewContainerDetail
@@ -389,10 +405,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, initCmd
 	
-	case ViewContainerLogsMsg:
+	case containerui.ViewLogsMsg:
 		// 容器列表视图请求切换到日志视图
-		if logsView, ok := m.logsView.(*LogsView); ok {
-			logsView.SetContainer(msg.ContainerID, msg.ContainerName)
+		if m.logsView != nil {
+			m.logsView.SetContainer(msg.ContainerID, msg.ContainerName)
 		}
 		m.previousView = m.currentView
 		m.currentView = ViewLogs
@@ -402,16 +418,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, initCmd
 	
-	case ViewNetworkDetailsMsg:
+	case networkui.ViewNetworkDetailsMsg:
 		// 网络列表视图请求切换到网络详情
 		if msg.Network != nil {
-			m.networkDetailView = NewNetworkDetailView(m.dockerClient, msg.Network)
+			m.networkDetailView = networkui.NewDetailView(m.dockerClient, msg.Network)
 			m.networkDetailView.SetSize(m.width, m.height)
 			m.previousView = m.currentView
 			m.currentView = ViewNetworkDetail
 			return m, m.networkDetailView.Init()
 		}
 		return m, nil
+	
+	case GoToComposeDetailMsg:
+		// Compose 列表视图请求切换到项目详情
+		if msg.Project != nil {
+			if project, ok := msg.Project.(*compose.Project); ok {
+				if m.composeDetailView != nil {
+					m.composeDetailView.SetProject(project)
+					m.composeDetailView.SetSize(m.width, m.height)
+					m.previousView = m.currentView
+					m.currentView = ViewComposeDetail
+					return m, m.composeDetailView.Init()
+				}
+			}
+		}
+		return m, nil
+	
+	case composeui.GoToDetailMsg:
+		// Compose 列表视图请求切换到项目详情（来自 compose 子包）
+		if msg.Project != nil {
+			if m.composeDetailView != nil {
+				m.composeDetailView.SetProject(msg.Project)
+				m.composeDetailView.SetSize(m.width, m.height)
+				m.previousView = m.currentView
+				m.currentView = ViewComposeDetail
+				return m, m.composeDetailView.Init()
+			}
+		}
+		return m, nil
+	
+	case composeui.GoToContainerDetailMsg:
+		// Compose 详情视图请求跳转到容器详情
+		m.selectedContainerID = msg.ContainerID
+		if m.containerDetailView != nil {
+			m.containerDetailView.SetContainer(msg.ContainerID, msg.ContainerName)
+		}
+		m.previousView = m.currentView
+		m.currentView = ViewContainerDetail
+		var initCmd tea.Cmd
+		if m.containerDetailView != nil {
+			initCmd = m.containerDetailView.Init()
+		}
+		return m, initCmd
+	
+	case containerui.GoBackMsg:
+		// 容器视图请求返回上一级
+		return m.goBack()
 	
 	case execShellMsg:
 		// 执行 shell 命令
@@ -476,13 +538,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.networkDetailView != nil {
 			m.networkDetailView.SetSize(msg.Width, msg.Height)
 		}
+		if m.composeDetailView != nil {
+			m.composeDetailView.SetSize(msg.Width, msg.Height)
+		}
 		if m.shellSelector != nil {
 			m.shellSelector.SetSize(msg.Width, msg.Height)
 		}
 		return m, nil
 	
 	// 处理 Shell 选择器的消息
-	case shellsDetectedMsg, shellsDetectErrorMsg:
+	case components.ShellsDetectedMsg, components.ShellsDetectErrorMsg:
 		if m.showShellSelector && m.shellSelector != nil {
 			cmd := m.shellSelector.Update(msg)
 			return m, cmd
@@ -499,8 +564,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if shell != "" {
 					m.showShellSelector = false
 					// 获取容器信息
-					containerID := m.shellSelector.containerID
-					containerName := m.shellSelector.containerName
+					containerID := m.shellSelector.ContainerID()
+					containerName := m.shellSelector.ContainerName()
 					return m, m.execShellWithShell(containerID, containerName, shell)
 				}
 			case "esc", "q":
@@ -543,8 +608,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 如果镜像列表视图的拉取输入框或打标签输入框或错误弹窗可见，不处理任何全局快捷键
 	if m.currentView == ViewImageList && m.imageListView != nil {
-		if (m.imageListView.pullInput != nil && m.imageListView.pullInput.IsVisible()) ||
-		   (m.imageListView.tagInput != nil && m.imageListView.tagInput.IsVisible()) ||
+		if m.imageListView.IsPullInputVisible() ||
+		   m.imageListView.IsTagInputVisible() ||
 		   m.imageListView.HasError() {
 			return m, nil
 		}
@@ -552,7 +617,7 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	
 	// 如果网络列表视图的错误弹窗或确认对话框可见，不处理任何全局快捷键
 	if m.currentView == ViewNetworkList && m.networkListView != nil {
-		if m.networkListView.HasError() || m.networkListView.showConfirmDialog || m.networkListView.showFilterMenu || m.networkListView.IsShowingCreateView() {
+		if m.networkListView.HasError() || m.networkListView.ShowConfirmDialog() || m.networkListView.ShowFilterMenu() || m.networkListView.IsShowingCreateView() {
 			return m, nil
 		}
 	}
@@ -767,6 +832,8 @@ func (m Model) goBack() (tea.Model, tea.Cmd) {
 		m.currentView = m.previousView
 	case ViewComposeList:
 		m.currentView = ViewWelcome
+	case ViewComposeDetail:
+		m.currentView = ViewComposeList
 	case ViewImageList:
 		m.currentView = ViewWelcome
 	case ViewImageDetails:
@@ -791,8 +858,8 @@ func (m Model) goBack() (tea.Model, tea.Cmd) {
 // 注意：大部分按键由视图自己处理，这里只保留需要访问全局状态的快捷键
 func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 如果处于搜索模式、显示确认对话框、编辑视图、错误弹窗或 JSON 查看器，让视图自己处理
-	if listView, ok := m.containerListView.(*ContainerListView); ok {
-		if listView.IsSearching() || listView.showConfirmDialog || listView.IsEditViewVisible() || listView.HasError() || listView.IsShowingJSONViewer() {
+	if m.containerListView != nil {
+		if m.containerListView.IsSearching() || m.containerListView.IsEditViewVisible() || m.containerListView.HasError() || m.containerListView.IsShowingJSONViewer() {
 			return m, nil  // 返回 nil，让 Update 传递给视图
 		}
 	}
@@ -800,8 +867,8 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "s":
 		// 进入容器 Shell - 显示 Shell 选择器（需要访问全局 shellSelector）
-		if listView, ok := m.containerListView.(*ContainerListView); ok {
-			if container := listView.GetSelectedContainer(); container != nil {
+		if m.containerListView != nil {
+			if container := m.containerListView.GetSelectedContainer(); container != nil {
 				// 检查容器是否在运行
 				if container.State != "running" {
 					return m, m.SetTemporaryMessage(MsgWarning, "⚠️ 只能在运行中的容器执行 shell", 3)
@@ -843,15 +910,15 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedContainerID != "" {
 			// 从详情视图获取容器名称
 			containerName := m.selectedContainerID[:12] // 默认使用短 ID
-			if detailView, ok := m.containerDetailView.(*ContainerDetailView); ok {
-				if detailView.details != nil {
-					containerName = detailView.details.Name
+			if m.containerDetailView != nil {
+				if details := m.containerDetailView.GetDetails(); details != nil {
+					containerName = details.Name
 				}
 			}
 			
 			// 设置日志视图的容器信息
-			if logsView, ok := m.logsView.(*LogsView); ok {
-				logsView.SetContainer(m.selectedContainerID, containerName)
+			if m.logsView != nil {
+				m.logsView.SetContainer(m.selectedContainerID, containerName)
 			}
 			
 			m.previousView = m.currentView
@@ -876,10 +943,10 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// 从详情视图获取容器名称和状态
 			containerName := m.selectedContainerID[:12]
 			containerState := "unknown"
-			if detailView, ok := m.containerDetailView.(*ContainerDetailView); ok {
-				if detailView.details != nil {
-					containerName = detailView.details.Name
-					containerState = detailView.details.State
+			if m.containerDetailView != nil {
+				if details := m.containerDetailView.GetDetails(); details != nil {
+					containerName = details.Name
+					containerState = details.State
 				}
 			}
 			
@@ -916,15 +983,8 @@ func (m Model) handleHelpKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleComposeListKeys 处理 Compose 列表视图的快捷键
 func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Compose 列表视图的按键大部分由视图自己处理
-	// 这里只处理需要切换视图的按键
-	switch msg.String() {
-	case "enter":
-		// 进入项目详情（TODO: 实现详情视图）
-		return m, m.SetTemporaryMessage(MsgInfo, "📋 项目详情功能开发中...", 3)
-	}
-	
-	// 其他按键不处理，返回 nil 让消息传递给视图
+	// Compose 列表视图的按键由视图自己处理
+	// 视图会发送 GoToComposeDetailMsg 来请求切换到详情视图
 	return m, nil
 }
 
@@ -1045,6 +1105,12 @@ func (m Model) View() string {
 		} else {
 			content = "🧩 Compose 视图未初始化"
 		}
+	case ViewComposeDetail:
+		if m.composeDetailView != nil {
+			content = m.composeDetailView.View()
+		} else {
+			content = "🧩 Compose 详情视图未初始化"
+		}
 	case ViewImageList:
 		if m.imageListView != nil {
 			content = m.imageListView.View()
@@ -1073,8 +1139,8 @@ func (m Model) View() string {
 		content = "未知视图"
 	}
 	
-	// 添加分级消息显示（非容器列表、Compose 列表、镜像列表和网络列表视图）
-	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewImageList && m.currentView != ViewNetworkList {
+	// 添加分级消息显示（非容器列表、Compose 列表、Compose 详情、镜像列表和网络列表视图）
+	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewComposeDetail && m.currentView != ViewImageList && m.currentView != ViewNetworkList {
 		if m.errorMsg != "" && m.dockerConnected {
 			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true)
 			content = "\n" + errorStyle.Render("❌ 致命错误: "+m.errorMsg) + "\n" + content
@@ -1112,61 +1178,39 @@ func (m Model) delegateToCurrentView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case ViewContainerList:
 		if m.containerListView != nil {
-			var updatedView View
-			updatedView, cmd = m.containerListView.Update(msg)
-			m.containerListView = updatedView
+			m.containerListView, cmd = m.containerListView.Update(msg)
 		}
 	case ViewContainerDetail:
 		if m.containerDetailView != nil {
-			var updatedView View
-			updatedView, cmd = m.containerDetailView.Update(msg)
-			m.containerDetailView = updatedView
+			m.containerDetailView, cmd = m.containerDetailView.Update(msg)
 		}
 	case ViewLogs:
 		if m.logsView != nil {
-			var updatedView View
-			updatedView, cmd = m.logsView.Update(msg)
-			m.logsView = updatedView
+			m.logsView, cmd = m.logsView.Update(msg)
 		}
 	case ViewComposeList:
 		if m.composeListView != nil {
-			var updatedView View
-			updatedView, cmd = m.composeListView.Update(msg)
-			if v, ok := updatedView.(*ComposeListView); ok {
-				m.composeListView = v
-			}
+			cmd = m.composeListView.Update(msg)
+		}
+	case ViewComposeDetail:
+		if m.composeDetailView != nil {
+			cmd = m.composeDetailView.Update(msg)
 		}
 	case ViewImageList:
 		if m.imageListView != nil {
-			var updatedView View
-			updatedView, cmd = m.imageListView.Update(msg)
-			if v, ok := updatedView.(*ImageListView); ok {
-				m.imageListView = v
-			}
+			m.imageListView, cmd = m.imageListView.Update(msg)
 		}
 	case ViewImageDetails:
 		if m.imageDetailsView != nil {
-			var updatedView View
-			updatedView, cmd = m.imageDetailsView.Update(msg)
-			if v, ok := updatedView.(*ImageDetailsView); ok {
-				m.imageDetailsView = v
-			}
+			m.imageDetailsView, cmd = m.imageDetailsView.Update(msg)
 		}
 	case ViewNetworkList:
 		if m.networkListView != nil {
-			var updatedView View
-			updatedView, cmd = m.networkListView.Update(msg)
-			if v, ok := updatedView.(*NetworkListView); ok {
-				m.networkListView = v
-			}
+			m.networkListView, cmd = m.networkListView.Update(msg)
 		}
 	case ViewNetworkDetail:
 		if m.networkDetailView != nil {
-			var updatedView View
-			updatedView, cmd = m.networkDetailView.Update(msg)
-			if v, ok := updatedView.(*NetworkDetailView); ok {
-				m.networkDetailView = v
-			}
+			m.networkDetailView, cmd = m.networkDetailView.Update(msg)
 		}
 	}
 	

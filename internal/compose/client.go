@@ -428,20 +428,20 @@ func (c *composeClient) parseJSONPS(output string) ([]Service, error) {
 		
 		// 简单解析 JSON（避免引入 encoding/json 的复杂性）
 		// 格式: {"Name":"xxx","Service":"xxx","State":"xxx",...}
-		name := extractJSONField(line, "Service")
-		if name == "" {
-			name = extractJSONField(line, "Name")
-		}
+		serviceName := extractJSONField(line, "Service")
+		containerName := extractJSONField(line, "Name")
 		state := extractJSONField(line, "State")
 		image := extractJSONField(line, "Image")
 		containerID := extractJSONField(line, "ID")
 		
-		if name == "" {
-			continue
+		// 如果没有 Service 字段，从容器名称中提取
+		if serviceName == "" {
+			serviceName = extractServiceName(containerName)
 		}
 		
-		// 从容器名称中提取服务名
-		serviceName := extractServiceName(name)
+		if serviceName == "" {
+			continue
+		}
 		
 		if svc, exists := serviceMap[serviceName]; exists {
 			svc.Containers = append(svc.Containers, containerID)

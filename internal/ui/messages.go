@@ -29,3 +29,8 @@ type ViewContainerLogsMsg struct {
 type ViewNetworkDetailsMsg struct {
 	Network *docker.Network
 }
+
+// GoToComposeDetailMsg 请求切换到 Compose 项目详情视图
+type GoToComposeDetailMsg struct {
+	Project interface{} // *compose.Project，使用 interface{} 避免循环导入
+}
