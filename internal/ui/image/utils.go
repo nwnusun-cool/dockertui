@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// FormatSize 格式化文件大小为友好格式
+// FormatSize format file size to friendly format
 func FormatSize(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -19,26 +19,26 @@ func FormatSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// FormatCreatedTime 格式化创建时间为友好格式
+// FormatCreatedTime format created time to friendly format
 func FormatCreatedTime(t time.Time) string {
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
-		return "刚刚"
+		return "just now"
 	case d < time.Hour:
-		return fmt.Sprintf("%d 分钟前", int(d.Minutes()))
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%d 小时前", int(d.Hours()))
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%d 天前", int(d.Hours()/24))
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	case d < 365*24*time.Hour:
-		return fmt.Sprintf("%d 个月前", int(d.Hours()/24/30))
+		return fmt.Sprintf("%dmo ago", int(d.Hours()/24/30))
 	default:
-		return fmt.Sprintf("%d 年前", int(d.Hours()/24/365))
+		return fmt.Sprintf("%dy ago", int(d.Hours()/24/365))
 	}
 }
 
-// FormatDuration 格式化时间间隔
+// FormatDuration format time duration
 func FormatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))

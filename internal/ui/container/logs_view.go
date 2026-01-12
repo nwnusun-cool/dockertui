@@ -6,17 +6,21 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"docktui/internal/docker"
+	"docktui/internal/i18n"
 	"docktui/internal/ui/components"
+	"docktui/internal/ui/search"
 )
 
 // LogsView 日志视图
@@ -36,6 +40,7 @@ type LogsView struct {
 	showTimestamp bool
 	loading    bool
 	errorMsg   string
+	successMsg string
 	
 	followCancel    context.CancelFunc
 	followActive    bool
@@ -43,6 +48,15 @@ type LogsView struct {
 	lastLogTime     string
 	logChan         chan string
 	chanClosed      bool
+	
+	// 搜索相关
+	searchMode   bool
+	searchInput  textinput.Model
+	searcher     *search.TextSearcher
+	
+	// 导出相关
+	exportMode   bool
+	exportInput  textinput.Model
 	
 	keys components.KeyMap
 }
@@ -56,6 +70,18 @@ func NewLogsView(dockerClient docker.Client) *LogsView {
 		PaddingLeft(1).
 		PaddingRight(1)
 	
+	// 搜索输入框
+	ti := textinput.New()
+	ti.Placeholder = ""
+	ti.CharLimit = 100
+	ti.Width = 30
+	
+	// 导出输入框
+	ei := textinput.New()
+	ei.Placeholder = ""
+	ei.CharLimit = 200
+	ei.Width = 50
+	
 	return &LogsView{
 		dockerClient:  dockerClient,
 		viewport:      vp,
@@ -66,6 +92,9 @@ func NewLogsView(dockerClient docker.Client) *LogsView {
 		logChan:       make(chan string, 100),
 		width:         100,
 		height:        30,
+		searchInput:   ti,
+		searcher:      search.NewTextSearcher(),
+		exportInput:   ei,
 	}
 }
 
@@ -81,6 +110,7 @@ func (v *LogsView) Init() tea.Cmd {
 		return nil
 	}
 	v.loading = true
+	v.followMode = true  // 默认开启跟随模式
 	return v.loadLogs
 }
 
@@ -119,8 +149,17 @@ func (v *LogsView) Update(msg tea.Msg) (*LogsView, tea.Cmd) {
 		v.loading = false
 		v.errorMsg = ""
 		v.viewport.SetContent(v.formatLogs())
-		if v.followMode {
-			v.viewport.GotoBottom()
+		v.viewport.GotoBottom()
+		
+		// 自动启动跟随模式
+		if v.followMode && !v.followActive {
+			if v.followCancel != nil {
+				v.followCancel()
+			}
+			v.logChan = make(chan string, 100)
+			v.chanClosed = false
+			v.followActive = true
+			return v, v.startStreamingLogs()
 		}
 		return v, nil
 		
@@ -161,9 +200,102 @@ func (v *LogsView) Update(msg tea.Msg) (*LogsView, tea.Cmd) {
 		return v, nil
 		
 	case tea.KeyMsg:
+		// 导出模式下的按键处理
+		if v.exportMode {
+			switch msg.String() {
+			case "esc":
+				v.exportMode = false
+				v.exportInput.Blur()
+				return v, nil
+			case "enter":
+				v.exportMode = false
+				v.exportInput.Blur()
+				filename := v.exportInput.Value()
+				if filename != "" {
+					if err := v.exportLogs(filename); err != nil {
+						v.errorMsg = fmt.Sprintf("%s: %s", i18n.T("export_failed"), err.Error())
+					} else {
+						v.successMsg = fmt.Sprintf("%s: %s", i18n.T("export_success"), filename)
+					}
+				}
+				return v, nil
+			default:
+				v.exportInput, cmd = v.exportInput.Update(msg)
+				return v, cmd
+			}
+		}
+		
+		// 搜索模式下的按键处理
+		if v.searchMode {
+			switch msg.String() {
+			case "esc":
+				v.searchMode = false
+				v.searchInput.Blur()
+				return v, nil
+			case "enter":
+				v.searchMode = false
+				v.searchInput.Blur()
+				query := v.searchInput.Value()
+				if query != "" {
+					v.searcher.Search(v.logs, query)
+					v.viewport.SetContent(v.formatLogs())
+					// 跳转到第一个匹配
+					if match := v.searcher.Current(); match != nil {
+						v.gotoLine(match.Line)
+					}
+				}
+				return v, nil
+			default:
+				v.searchInput, cmd = v.searchInput.Update(msg)
+				return v, cmd
+			}
+		}
+		
+		// 正常模式下的按键处理
 		switch {
 		case msg.String() == "esc":
+			// 清除成功消息
+			if v.successMsg != "" {
+				v.successMsg = ""
+				return v, nil
+			}
+			// 如果有搜索结果，先清除搜索
+			if v.searcher.HasMatches() {
+				v.searcher.Clear()
+				v.searchInput.SetValue("")
+				v.viewport.SetContent(v.formatLogs())
+				return v, nil
+			}
 			return v, func() tea.Msg { return GoBackMsg{} }
+		case msg.String() == "/":
+			// 进入搜索模式
+			v.searchMode = true
+			v.searchInput.Focus()
+			return v, textinput.Blink
+		case msg.String() == "e", msg.String() == "S":
+			// 进入导出模式
+			v.exportMode = true
+			v.successMsg = ""
+			// 生成默认文件名
+			name := strings.ReplaceAll(v.containerName, "/", "")
+			defaultName := fmt.Sprintf("%s_%s.log", name, time.Now().Format("20060102_150405"))
+			v.exportInput.SetValue(defaultName)
+			v.exportInput.Focus()
+			return v, textinput.Blink
+		case msg.String() == "n":
+			// 下一个匹配
+			if match := v.searcher.Next(); match != nil {
+				v.viewport.SetContent(v.formatLogs())
+				v.gotoLine(match.Line)
+			}
+			return v, nil
+		case msg.String() == "N":
+			// 上一个匹配
+			if match := v.searcher.Prev(); match != nil {
+				v.viewport.SetContent(v.formatLogs())
+				v.gotoLine(match.Line)
+			}
+			return v, nil
 		case key.Matches(msg, v.keys.ToggleFollow):
 			return v.toggleFollowMode()
 		case key.Matches(msg, v.keys.ToggleWrap):
@@ -187,6 +319,21 @@ func (v *LogsView) Update(msg tea.Msg) (*LogsView, tea.Cmd) {
 	
 	v.viewport, cmd = v.viewport.Update(msg)
 	return v, cmd
+}
+
+// gotoLine 跳转到指定行
+func (v *LogsView) gotoLine(lineIdx int) {
+	targetY := lineIdx
+	if targetY < 0 {
+		targetY = 0
+	}
+	v.viewport.SetYOffset(targetY)
+}
+
+// exportLogs 导出日志到文件
+func (v *LogsView) exportLogs(filename string) error {
+	content := strings.Join(v.logs, "\n")
+	return os.WriteFile(filename, []byte(content), 0644)
 }
 
 // View 渲染视图
@@ -215,9 +362,82 @@ func (v *LogsView) View() string {
 	}
 	
 	s.WriteString("\n  " + v.viewport.View() + "\n")
-	s.WriteString(v.renderKeyHints())
+	
+	// 显示成功消息
+	if v.successMsg != "" {
+		s.WriteString(v.renderSuccessMsg())
+	}
+	
+	// 导出模式显示输入框
+	if v.exportMode {
+		s.WriteString(v.renderExportBar())
+	} else if v.searchMode {
+		// 搜索模式下只显示搜索栏，隐藏快捷键提示
+		s.WriteString(v.renderSearchBar())
+	} else {
+		if v.searcher.HasMatches() {
+			s.WriteString(v.renderSearchBar())
+		}
+		s.WriteString(v.renderKeyHints())
+	}
 	
 	return s.String()
+}
+
+// renderSearchBar 渲染搜索栏（底部风格）
+func (v *LogsView) renderSearchBar() string {
+	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	matchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	
+	availableWidth := v.width - 4
+	if availableWidth < 80 {
+		availableWidth = 80
+	}
+	
+	divider := sepStyle.Render(strings.Repeat("─", availableWidth))
+	
+	var content string
+	
+	if v.searchMode {
+		cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
+		content = promptStyle.Render("/") + v.searchInput.Value() + cursor +
+			"  " + infoStyle.Render("["+i18n.T("press_to_confirm")+" "+i18n.T("press_to_cancel")+"]")
+	} else if v.searcher.HasMatches() {
+		matchInfo := infoStyle.Render(fmt.Sprintf("[%d/%d]", v.searcher.CurrentIndex(), v.searcher.MatchCount()))
+		content = promptStyle.Render("/"+v.searcher.Query()) + " " + matchStyle.Render(matchInfo) +
+			"  " + hintStyle.Render("n="+i18n.T("search_next")+" N="+i18n.T("search_prev")+" ESC="+i18n.T("search_clear"))
+	}
+	
+	return "\n  " + divider + "\n  " + content + "\n"
+}
+
+// renderExportBar 渲染导出栏
+func (v *LogsView) renderExportBar() string {
+	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	
+	availableWidth := v.width - 4
+	if availableWidth < 80 {
+		availableWidth = 80
+	}
+	
+	divider := sepStyle.Render(strings.Repeat("─", availableWidth))
+	
+	cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
+	content := promptStyle.Render("📁 "+i18n.T("export_to")+": ") + v.exportInput.Value() + cursor +
+		"  " + infoStyle.Render("["+i18n.T("press_to_confirm")+" "+i18n.T("press_to_cancel")+"]")
+	
+	return "\n  " + divider + "\n  " + content + "\n"
+}
+
+// renderSuccessMsg 渲染成功消息
+func (v *LogsView) renderSuccessMsg() string {
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+	return "  " + successStyle.Render("✓ "+v.successMsg) + "\n"
 }
 
 // renderHeader 渲染标题栏
@@ -228,7 +448,7 @@ func (v *LogsView) renderHeader() string {
 		Background(lipgloss.Color("57")).
 		Padding(0, 1)
 	
-	title := titleStyle.Render("📜 日志: " + v.containerName)
+	title := titleStyle.Render("📜 " + i18n.T("logs") + ": " + v.containerName)
 	
 	lineWidth := v.width - 4
 	if lineWidth < 60 {
@@ -270,16 +490,12 @@ func (v *LogsView) renderStatusBar() string {
 	
 	sep := sepStyle.Render("  │  ")
 	
-	status := labelStyle.Render("Follow:") + " " + followStatus + sep +
-		labelStyle.Render("Wrap:") + " " + wrapStatus + sep +
-		labelStyle.Render("Lines:") + " " + valueStyle.Render(fmt.Sprintf("%d", len(v.logs)))
-	
-	if len(v.logs) > 0 {
-		status += sep + offStyle.Render("显示最近 1000 行")
-	}
+	status := labelStyle.Render(i18n.T("follow")+":") + " " + followStatus + sep +
+		labelStyle.Render(i18n.T("wrap")+":") + " " + wrapStatus + sep +
+		labelStyle.Render(i18n.T("lines")+":") + " " + valueStyle.Render(fmt.Sprintf("%d", len(v.logs)))
 	
 	if v.followMode && v.followActive && !v.lastRefreshTime.IsZero() {
-		status += sep + offStyle.Render("最新: "+v.lastRefreshTime.Format("15:04:05"))
+		status += sep + offStyle.Render("Latest: "+v.lastRefreshTime.Format("15:04:05"))
 	}
 	
 	return "\n  " + status + "\n"
@@ -331,16 +547,16 @@ func (v *LogsView) renderEmptyState() string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 	
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		hintStyle.Render("📭 暂无日志"),
+		hintStyle.Render("📭 "+i18n.T("no_logs")),
 		"",
-		titleStyle.Render("可能的情况:"),
-		hintStyle.Render("  • 容器刚启动，还没有产生日志"),
-		hintStyle.Render("  • 应用程序没有输出到 stdout/stderr"),
-		hintStyle.Render("  • 日志已被清空或轮转"),
+		titleStyle.Render("Possible reasons:"),
+		hintStyle.Render("  • Container just started, no logs yet"),
+		hintStyle.Render("  • Application not outputting to stdout/stderr"),
+		hintStyle.Render("  • Logs have been cleared or rotated"),
 		"",
-		titleStyle.Render("操作提示:"),
-		hintStyle.Render("  • 按 ")+keyStyle.Render("f")+hintStyle.Render(" 开启 Follow 模式"),
-		hintStyle.Render("  • 按 ")+keyStyle.Render("r")+hintStyle.Render(" 刷新日志"),
+		titleStyle.Render("Tips:"),
+		hintStyle.Render("  • Press ")+keyStyle.Render("f")+hintStyle.Render(" to enable Follow mode"),
+		hintStyle.Render("  • Press ")+keyStyle.Render("r")+hintStyle.Render(" to refresh"),
 	)
 	
 	return "\n  " + boxStyle.Render(content) + "\n"
@@ -358,13 +574,14 @@ func (v *LogsView) renderKeyHints() string {
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	
 	items := []struct{ key, desc string }{
-		{"j/k", "滚动"},
-		{"g/G", "首/尾"},
-		{"f", "Follow"},
-		{"w", "换行"},
-		{"r", "刷新"},
-		{"Esc", "返回"},
-		{"q", "退出"},
+		{"j/k", i18n.T("scroll_hint")},
+		{"g/G", i18n.T("jump_hint")},
+		{"/", i18n.T("search")},
+		{"e", i18n.T("export")},
+		{"f", i18n.T("follow")},
+		{"w", i18n.T("wrap")},
+		{"r", i18n.T("refresh")},
+		{"Esc", i18n.T("back")},
 	}
 	
 	var parts []string
@@ -393,6 +610,8 @@ func (v *LogsView) formatLogs() string {
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("226")).Foreground(lipgloss.Color("0"))
+	currentHighlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("208")).Foreground(lipgloss.Color("0")).Bold(true)
 	
 	var formatted strings.Builder
 	contentWidth := v.width - 12
@@ -403,6 +622,7 @@ func (v *LogsView) formatLogs() string {
 	for i, line := range v.logs {
 		formatted.WriteString(lineNumStyle.Render(fmt.Sprintf("%4d │ ", i+1)))
 		
+		// 基础样式
 		var style lipgloss.Style
 		lineLower := strings.ToLower(line)
 		if strings.Contains(lineLower, "error") || strings.Contains(lineLower, "fatal") {
@@ -415,7 +635,17 @@ func (v *LogsView) formatLogs() string {
 			style = normalStyle
 		}
 		
+		// 处理搜索高亮
+		displayLine := line
+		if v.searcher.HasMatches() && v.searcher.IsLineMatched(i) {
+			isCurrentLine := v.searcher.IsCurrentMatchLine(i)
+			displayLine = v.highlightLine(line, i, highlightStyle, currentHighlightStyle, isCurrentLine)
+		} else {
+			displayLine = style.Render(line)
+		}
+		
 		if v.wrapMode && len(line) > contentWidth {
+			// 换行模式下简化处理（不高亮，避免复杂度）
 			for j := 0; j < len(line); j += contentWidth {
 				end := j + contentWidth
 				if end > len(line) {
@@ -428,13 +658,56 @@ func (v *LogsView) formatLogs() string {
 				}
 			}
 		} else {
-			formatted.WriteString(style.Render(line))
+			formatted.WriteString(displayLine)
 		}
 		
 		formatted.WriteString("\n")
 	}
 	
 	return formatted.String()
+}
+
+// highlightLine 高亮行中的匹配文本
+func (v *LogsView) highlightLine(line string, lineIdx int, hlStyle, currentHlStyle lipgloss.Style, isCurrentLine bool) string {
+	matches := v.searcher.GetLineMatches(lineIdx)
+	if len(matches) == 0 {
+		return line
+	}
+	
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	
+	var result strings.Builder
+	lastEnd := 0
+	
+	for _, m := range matches {
+		// 添加匹配前的文本
+		if m.Column > lastEnd {
+			result.WriteString(normalStyle.Render(line[lastEnd:m.Column]))
+		}
+		
+		// 添加高亮的匹配文本
+		end := m.Column + m.Length
+		if end > len(line) {
+			end = len(line)
+		}
+		
+		// 当前匹配使用不同颜色
+		if isCurrentLine && v.searcher.Current() != nil && 
+		   v.searcher.Current().Line == lineIdx && v.searcher.Current().Column == m.Column {
+			result.WriteString(currentHlStyle.Render(line[m.Column:end]))
+		} else {
+			result.WriteString(hlStyle.Render(line[m.Column:end]))
+		}
+		
+		lastEnd = end
+	}
+	
+	// 添加最后一个匹配后的文本
+	if lastEnd < len(line) {
+		result.WriteString(normalStyle.Render(line[lastEnd:]))
+	}
+	
+	return result.String()
 }
 
 // truncate 截断字符串
@@ -483,7 +756,7 @@ func (v *LogsView) loadLogs() tea.Msg {
 	
 	opts := docker.LogOptions{
 		Follow:     false,
-		Tail:       1000,
+		Tail:       100,       // 只获取最近 100 行作为初始显示
 		Timestamps: true,
 	}
 	

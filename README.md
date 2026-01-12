@@ -1,6 +1,6 @@
 # DockTUI
 
-🐳 一个现代化的 Docker 终端管理工具，提供类似 [k9s](https://k9scli.io/) 的交互体验。
+🐳 一个现代化的 Docker 终端管理工具，便捷的交互体验。
 
 ![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)

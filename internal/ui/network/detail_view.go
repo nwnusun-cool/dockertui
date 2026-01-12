@@ -262,15 +262,15 @@ func (v *DetailView) loadNetworkDetails() tea.Msg {
 	return NetworkDetailLoadedMsg{Details: details}
 }
 
-// formatCreatedTime 格式化创建时间
+// formatCreatedTime format created time
 func formatCreatedTime(t time.Time) string {
 	d := time.Since(t)
 	switch {
-	case d < time.Minute: return "刚刚"
-	case d < time.Hour: return fmt.Sprintf("%d 分钟前", int(d.Minutes()))
-	case d < 24*time.Hour: return fmt.Sprintf("%d 小时前", int(d.Hours()))
-	case d < 30*24*time.Hour: return fmt.Sprintf("%d 天前", int(d.Hours()/24))
-	case d < 365*24*time.Hour: return fmt.Sprintf("%d 个月前", int(d.Hours()/24/30))
-	default: return fmt.Sprintf("%d 年前", int(d.Hours()/24/365))
+	case d < time.Minute: return "just now"
+	case d < time.Hour: return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour: return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour: return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	case d < 365*24*time.Hour: return fmt.Sprintf("%dmo ago", int(d.Hours()/24/30))
+	default: return fmt.Sprintf("%dy ago", int(d.Hours()/24/365))
 	}
 }

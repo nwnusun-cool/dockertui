@@ -216,6 +216,7 @@ func (v *ListView) handleNormalKey(msg tea.KeyMsg) (*ListView, tea.Cmd) {
 	case "c":
 		v.showCreateView = true
 		v.createView.Reset()
+		v.createView.SetSize(v.width, v.height)
 		v.createView.SetCallbacks(func(networkID string) {}, func() { v.showCreateView = false })
 		return v, nil
 	case "f": v.showFilterMenu = true; return v, nil
@@ -281,6 +282,7 @@ func (v *ListView) SetSize(width, height int) {
 	tableHeight := height - 15; if tableHeight < 5 { tableHeight = 5 }
 	if v.scrollTable != nil { v.scrollTable.SetSize(width-4, tableHeight) }
 	if v.errorDialog != nil { v.errorDialog.SetWidth(width) }
+	if v.createView != nil { v.createView.SetSize(width, height) }
 }
 
 func (v *ListView) renderStatusBar() string {

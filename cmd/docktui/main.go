@@ -8,13 +8,17 @@ import (
 
 	"docktui/internal/config"
 	"docktui/internal/docker"
+	"docktui/internal/i18n"
 	"docktui/internal/ui"
 )
 
 func main() {
+	// 初始化 i18n
+	i18n.Init()
+	
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 	_ = cfg
 

@@ -594,18 +594,18 @@ func (v *ListView) View() string {
 	
 	if len(v.filteredContainers) == 0 {
 		var filterHints []string
-		filterHints = append(filterHints, "", SearchHintStyle.Render("🔍 没有匹配的容器"), "")
-		filterHints = append(filterHints, StatusBarLabelStyle.Render("当前搜索条件:"))
+		filterHints = append(filterHints, "", SearchHintStyle.Render("🔍 No matching containers"), "")
+		filterHints = append(filterHints, StatusBarLabelStyle.Render("Current search:"))
 		if v.searchQuery != "" {
-			filterHints = append(filterHints, SearchHintStyle.Render("   • 搜索关键字: ")+StatusBarKeyStyle.Render("\""+v.searchQuery+"\""))
+			filterHints = append(filterHints, SearchHintStyle.Render("   • Keyword: ")+StatusBarKeyStyle.Render("\""+v.searchQuery+"\""))
 		}
-		filterHints = append(filterHints, "", StatusBarLabelStyle.Render("💡 操作提示:"))
+		filterHints = append(filterHints, "", StatusBarLabelStyle.Render("💡 Tips:"))
 		if v.searchQuery != "" {
-			filterHints = append(filterHints, SearchHintStyle.Render("   • 按 ")+StatusBarKeyStyle.Render("ESC")+SearchHintStyle.Render(" 清除搜索"))
+			filterHints = append(filterHints, SearchHintStyle.Render("   • Press ")+StatusBarKeyStyle.Render("ESC")+SearchHintStyle.Render(" to clear search"))
 		} else {
-			filterHints = append(filterHints, SearchHintStyle.Render("   • 按 ")+StatusBarKeyStyle.Render("/")+SearchHintStyle.Render(" 开始搜索"))
+			filterHints = append(filterHints, SearchHintStyle.Render("   • Press ")+StatusBarKeyStyle.Render("/")+SearchHintStyle.Render(" to search"))
 		}
-		filterHints = append(filterHints, SearchHintStyle.Render("   • 按 ")+StatusBarKeyStyle.Render("r")+SearchHintStyle.Render(" 刷新列表"), "")
+		filterHints = append(filterHints, SearchHintStyle.Render("   • Press ")+StatusBarKeyStyle.Render("r")+SearchHintStyle.Render(" to refresh"), "")
 		emptyFilterContent := lipgloss.JoinVertical(lipgloss.Left, filterHints...)
 		s += "\n  " + StateBoxStyle.Render(emptyFilterContent) + "\n"
 		return s

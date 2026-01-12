@@ -147,21 +147,81 @@ func (v *CreateView) handleBackspace() {
 
 // View 渲染视图
 func (v *CreateView) View() string {
-	var s strings.Builder
-	s.WriteString("\n  " + FormTitleStyle.Render("🌐 Create Network") + "\n\n")
-	if v.errorMsg != "" { s.WriteString("  " + FormErrorStyle.Render("❌ "+v.errorMsg) + "\n\n") }
-	if v.creating { s.WriteString("  " + FormHintStyle.Render("⏳ 正在创建网络...") + "\n"); return s.String() }
-	s.WriteString(v.renderField(FieldName, "Name", v.name, "网络名称（必填）"))
-	s.WriteString(v.renderDriverField())
-	s.WriteString(v.renderField(FieldSubnet, "Subnet", v.subnet, "子网 CIDR，如 172.20.0.0/16"))
-	s.WriteString(v.renderField(FieldGateway, "Gateway", v.gateway, "网关地址，如 172.20.0.1"))
-	s.WriteString(v.renderField(FieldIPRange, "IP Range", v.ipRange, "IP 范围（可选）"))
-	s.WriteString(v.renderCheckbox(FieldInternal, "Internal", v.internal, "内部网络（不能访问外部）"))
-	s.WriteString(v.renderCheckbox(FieldAttachable, "Attachable", v.attachable, "允许手动连接容器"))
-	s.WriteString(v.renderCheckbox(FieldIPv6, "IPv6", v.ipv6, "启用 IPv6"))
-	s.WriteString("\n" + v.renderButtons())
-	s.WriteString("\n\n" + v.renderHints())
-	return s.String()
+	width := v.width
+	height := v.height
+	if width < 80 { width = 80 }
+	if height < 20 { height = 20 }
+
+	// 构建表单内容
+	var content strings.Builder
+	
+	if v.errorMsg != "" { 
+		content.WriteString(FormErrorStyle.Render("❌ "+v.errorMsg) + "\n\n") 
+	}
+	
+	if v.creating { 
+		content.WriteString(FormHintStyle.Render("⏳ Creating network...") + "\n")
+	} else {
+		// 表单字段
+		content.WriteString(v.renderField(FieldName, "Name", v.name, "required"))
+		content.WriteString(v.renderDriverField())
+		content.WriteString(v.renderField(FieldSubnet, "Subnet", v.subnet, "e.g. 172.20.0.0/16"))
+		content.WriteString(v.renderField(FieldGateway, "Gateway", v.gateway, "e.g. 172.20.0.1"))
+		content.WriteString(v.renderField(FieldIPRange, "IP Range", v.ipRange, "optional"))
+		content.WriteString(v.renderCheckbox(FieldInternal, "Internal", v.internal, "No external access"))
+		content.WriteString(v.renderCheckbox(FieldAttachable, "Attachable", v.attachable, "Allow manual attach"))
+		content.WriteString(v.renderCheckbox(FieldIPv6, "IPv6", v.ipv6, "Enable IPv6"))
+		content.WriteString("\n" + v.renderButtons())
+	}
+
+	// 用边框包裹
+	formWidth := 58
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(1, 2).
+		Width(formWidth)
+	
+	// 标题在边框外上方
+	title := FormTitleStyle.Render("🌐 Create Network")
+	box := boxStyle.Render(content.String())
+	
+	// 底部提示
+	hints := v.renderHints()
+
+	// 计算各部分
+	boxLines := strings.Split(box, "\n")
+	boxWidth := lipgloss.Width(boxLines[0])
+	totalHeight := len(boxLines) + 3 // title + hints
+	
+	// 垂直居中
+	topPadding := (height - totalHeight) / 3
+	if topPadding < 1 { topPadding = 1 }
+
+	// 水平居中
+	leftPadding := (width - boxWidth) / 2
+	if leftPadding < 2 { leftPadding = 2 }
+
+	// 组装最终输出
+	var result strings.Builder
+	result.WriteString(strings.Repeat("\n", topPadding))
+	
+	// 标题居中
+	titlePadding := leftPadding + (boxWidth - lipgloss.Width(title)) / 2
+	if titlePadding < 2 { titlePadding = 2 }
+	result.WriteString(strings.Repeat(" ", titlePadding) + title + "\n")
+	
+	// 边框内容
+	for _, line := range boxLines {
+		result.WriteString(strings.Repeat(" ", leftPadding) + line + "\n")
+	}
+	
+	// 提示居中
+	hintsPadding := leftPadding + (boxWidth - lipgloss.Width(hints)) / 2
+	if hintsPadding < 2 { hintsPadding = 2 }
+	result.WriteString(strings.Repeat(" ", hintsPadding) + hints + "\n")
+	
+	return result.String()
 }
 
 // SetSize 设置视图尺寸
@@ -169,7 +229,9 @@ func (v *CreateView) SetSize(width, height int) { v.width = width; v.height = he
 
 func (v *CreateView) renderField(field CreateField, label, value, hint string) string {
 	isActive := !v.onButtons && v.activeField == field
-	labelStr := FormLabelStyle.Render(label + ":")
+	labelStyle := FormLabelStyle.Copy().Width(12)
+	labelStr := labelStyle.Render(label + ":")
+	
 	var valueStr string
 	if isActive {
 		valueStr = FormInputActiveStyle.Render(value + "█")
@@ -178,12 +240,14 @@ func (v *CreateView) renderField(field CreateField, label, value, hint string) s
 	} else {
 		valueStr = FormInputStyle.Render(value)
 	}
-	return fmt.Sprintf("  %s %s  %s\n", labelStr, valueStr, FormHintStyle.Render(hint))
+	return fmt.Sprintf("%s %s  %s\n", labelStr, valueStr, FormHintStyle.Render(hint))
 }
 
 func (v *CreateView) renderDriverField() string {
 	isActive := !v.onButtons && v.activeField == FieldDriver
-	labelStr := FormLabelStyle.Render("Driver:")
+	labelStyle := FormLabelStyle.Copy().Width(12)
+	labelStr := labelStyle.Render("Driver:")
+	
 	var options []string
 	for i, opt := range driverOptions {
 		if i == v.driver {
@@ -196,16 +260,18 @@ func (v *CreateView) renderDriverField() string {
 			options = append(options, FormHintStyle.Render(opt))
 		}
 	}
-	return fmt.Sprintf("  %s %s  %s\n", labelStr, strings.Join(options, "  "), FormHintStyle.Render("← → 切换"))
+	return fmt.Sprintf("%s %s\n", labelStr, strings.Join(options, " "))
 }
 
 func (v *CreateView) renderCheckbox(field CreateField, label string, checked bool, hint string) string {
 	isActive := !v.onButtons && v.activeField == field
-	labelStr := FormLabelStyle.Render(label + ":")
+	labelStyle := FormLabelStyle.Copy().Width(12)
+	labelStr := labelStyle.Render(label + ":")
+	
 	checkStr := "[ ]"
 	if checked { checkStr = FormCheckboxStyle.Render("[✓]") }
 	if isActive { checkStr = lipgloss.NewStyle().Reverse(true).Render(checkStr) }
-	return fmt.Sprintf("  %s %s  %s\n", labelStr, checkStr, FormHintStyle.Render(hint+" (空格切换)"))
+	return fmt.Sprintf("%s %s  %s\n", labelStr, checkStr, FormHintStyle.Render(hint))
 }
 
 func (v *CreateView) renderButtons() string {
@@ -213,21 +279,23 @@ func (v *CreateView) renderButtons() string {
 	if v.onButtons {
 		if v.buttonFocus == 0 { cancelStyle = FormButtonActiveStyle } else { createStyle = FormButtonActiveStyle }
 	}
-	return "  " + strings.Repeat(" ", 14) + cancelStyle.Render("[ Cancel ]") + "    " + createStyle.Render("[ Create ]")
+	buttons := cancelStyle.Render("[ Cancel ]") + "    " + createStyle.Render("[ Create ]")
+	return lipgloss.NewStyle().Width(52).Align(lipgloss.Center).Render(buttons)
 }
 
 func (v *CreateView) renderHints() string {
 	hints := []string{
-		FormHintStyle.Render("Tab/↑↓") + " 切换字段",
-		FormHintStyle.Render("Space") + " 切换复选框",
-		FormHintStyle.Render("Enter") + " 确认",
-		FormHintStyle.Render("Esc") + " 取消",
+		FormHintStyle.Render("↑↓") + " Move",
+		FormHintStyle.Render("←→") + " Driver",
+		FormHintStyle.Render("Space") + " Toggle",
+		FormHintStyle.Render("Enter") + " OK",
+		FormHintStyle.Render("Esc") + " Cancel",
 	}
-	return "  " + strings.Join(hints, "  │  ")
+	return strings.Join(hints, "  │  ")
 }
 
 func (v *CreateView) createNetwork() tea.Cmd {
-	if strings.TrimSpace(v.name) == "" { v.errorMsg = "网络名称不能为空"; return nil }
+	if strings.TrimSpace(v.name) == "" { v.errorMsg = "Network name is required"; return nil }
 	v.creating = true
 	v.errorMsg = ""
 	return func() tea.Msg {
