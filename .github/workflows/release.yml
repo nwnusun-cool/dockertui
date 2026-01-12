@@ -22,8 +22,8 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-          GOOS=linux GOARCH=amd64 go build -o dist/docktui-linux-amd64 ./cmd/docktui
-          GOOS=windows GOARCH=amd64 go build -o dist/docktui-windows-amd64.exe ./cmd/docktui
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/docktui-linux-amd64 ./cmd/docktui
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/docktui-windows-amd64.exe ./cmd/docktui
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
