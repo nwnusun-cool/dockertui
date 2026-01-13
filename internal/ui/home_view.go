@@ -66,10 +66,10 @@ func NewHomeView(dockerClient docker.Client) *HomeView {
 	}
 
 	v.resources = []ResourceInfo{
-		{Type: ResourceContainers, Name: "Containers", Icon: "📦", Key: "c", Available: true},
-		{Type: ResourceImages, Name: "Images", Icon: "🖼️", Key: "i", Available: true},
-		{Type: ResourceNetworks, Name: "Networks", Icon: "🌐", Key: "n", Available: true},
-		{Type: ResourceCompose, Name: "Compose", Icon: "🧩", Key: "o", Available: true},
+		{Type: ResourceContainers, Name: "Containers", Icon: "◈", Key: "c", Available: true},
+		{Type: ResourceImages, Name: "Images", Icon: "▣", Key: "i", Available: true},
+		{Type: ResourceNetworks, Name: "Networks", Icon: "⊕", Key: "n", Available: true},
+		{Type: ResourceCompose, Name: "Compose", Icon: "⚙", Key: "o", Available: true},
 	}
 
 	return v
@@ -377,12 +377,19 @@ func (v *HomeView) renderCardWithWidth(res ResourceInfo, selected bool, num int,
 		Padding(0, 2).
 		Width(cardWidth)
 
-	// 标题 (图标 + 名称)
-	titleStyle := lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center)
+	// 标题 (图标 + 名称) - 不使用 Width 自动对齐，手动居中
+	titleText := res.Icon + " " + res.Name
+	titleStyle := lipgloss.NewStyle()
 	if selected {
 		titleStyle = titleStyle.Foreground(lipgloss.Color("81")).Bold(true)
 	}
-	title := titleStyle.Render(res.Icon + " " + res.Name)
+	// 手动计算居中填充，假设图标占 1 个显示宽度
+	titleDisplayWidth := len(res.Name) + 2 // icon(1) + space(1) + name
+	titlePadding := (contentWidth - titleDisplayWidth) / 2
+	if titlePadding < 0 {
+		titlePadding = 0
+	}
+	title := strings.Repeat(" ", titlePadding) + titleStyle.Render(titleText)
 
 	// 数量
 	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true)
