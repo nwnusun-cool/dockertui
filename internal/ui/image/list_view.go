@@ -121,12 +121,12 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		v.errorMsg = msg.Err.Error()
 		return v, nil
 	case ImageOperationSuccessMsg:
-		v.successMsg = fmt.Sprintf("✅ %s成功: %s", msg.Operation, msg.Image)
+		v.successMsg = fmt.Sprintf("✅ %s succeeded: %s", msg.Operation, msg.Image)
 		v.successMsgTime = time.Now()
 		v.errorMsg = ""
 		return v, tea.Batch(v.loadImages, v.clearSuccessMessageAfter(3*time.Second))
 	case ImageOperationErrorMsg:
-		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s失败 (%s): %v", msg.Operation, msg.Image, msg.Err)) }
+		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s failed (%s): %v", msg.Operation, msg.Image, msg.Err)) }
 		v.successMsg = ""
 		return v, nil
 	case ImageInUseErrorMsg:
@@ -142,19 +142,19 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		}
 		return v, nil
 	case ImageInspectErrorMsg:
-		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("获取镜像信息失败: %v", msg.Err)) }
+		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("Failed to get image info: %v", msg.Err)) }
 		return v, nil
 	case ImageExportSuccessMsg:
-		v.successMsg = fmt.Sprintf("✅ 成功导出 %d 个镜像到 %s", msg.Count, msg.Dir)
+		v.successMsg = fmt.Sprintf("✅ Exported %d images to %s", msg.Count, msg.Dir)
 		v.successMsgTime = time.Now()
 		v.selectedImages = make(map[string]bool)
 		v.updateTableData()
 		return v, v.clearSuccessMessageAfter(5*time.Second)
 	case ImageExportErrorMsg:
-		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("导出镜像失败: %v", msg.Err)) }
+		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("Export image failed: %v", msg.Err)) }
 		return v, nil
 	case ImageExportProgressMsg:
-		v.successMsg = fmt.Sprintf("⏳ 正在导出 [%d/%d]: %s", msg.Current, msg.Total, msg.Name)
+		v.successMsg = fmt.Sprintf("⏳ Exporting [%d/%d]: %s", msg.Current, msg.Total, msg.Name)
 		v.successMsgTime = time.Now()
 		return v, nil
 	case components.TaskEventMsg:
@@ -179,7 +179,7 @@ func (v *ListView) handleTaskEvent(msg components.TaskEventMsg) (*ListView, tea.
 		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s: %v", event.TaskName, event.Error)) }
 		return v, v.taskBar.ListenForEvents()
 	case task.EventCancelled:
-		v.successMsg = fmt.Sprintf("⏹️ %s 已取消", event.TaskName)
+		v.successMsg = fmt.Sprintf("⏹️ %s cancelled", event.TaskName)
 		v.successMsgTime = time.Now()
 		return v, tea.Batch(v.clearSuccessMessageAfter(3*time.Second), v.taskBar.ListenForEvents())
 	case task.EventProgress, task.EventStarted:
@@ -320,7 +320,7 @@ func (v *ListView) handleNormalKey(msg tea.KeyMsg) (*ListView, tea.Cmd) {
 	case "x":
 		if v.taskBar.HasActiveTasks() {
 			v.taskBar.CancelFirstTask()
-			v.successMsg = "⏹️ 正在取消任务..."
+			v.successMsg = "⏹️ Cancelling task..."
 			v.successMsgTime = time.Now()
 			return v, v.clearSuccessMessageAfter(2*time.Second)
 		}
@@ -340,17 +340,17 @@ func (v *ListView) View() string {
 	}
 	s += v.renderStatsBar()
 	if v.loading {
-		loadingContent := lipgloss.JoinVertical(lipgloss.Center, "", StatusBarKeyStyle.Render("⏳ 正在加载镜像列表..."), "", SearchHintStyle.Render("请稍候，正在从 Docker 获取数据"), "")
+		loadingContent := lipgloss.JoinVertical(lipgloss.Center, "", StatusBarKeyStyle.Render("⏳ Loading image list..."), "", SearchHintStyle.Render("Please wait, fetching data from Docker"), "")
 		s += "\n  " + StateBoxStyle.Render(loadingContent) + "\n"
 		return s
 	}
 	if v.errorMsg != "" {
-		errorContent := lipgloss.JoinVertical(lipgloss.Left, "", ErrorMsgStyle.Render("❌ 加载失败: "+v.errorMsg), "", StatusBarLabelStyle.Render("💡 可能的原因:"), SearchHintStyle.Render("   • Docker 守护进程未运行"), SearchHintStyle.Render("   • 网络连接问题"), SearchHintStyle.Render("   • 权限不足"), "", StatusBarKeyStyle.Render("按 r 重新加载")+" "+SearchHintStyle.Render("或")+" "+StatusBarKeyStyle.Render("按 Esc 返回"), "")
+		errorContent := lipgloss.JoinVertical(lipgloss.Left, "", ErrorMsgStyle.Render("❌ Load failed: "+v.errorMsg), "", StatusBarLabelStyle.Render("💡 Possible reasons:"), SearchHintStyle.Render("   • Docker daemon not running"), SearchHintStyle.Render("   • Network connection issue"), SearchHintStyle.Render("   • Insufficient permissions"), "", StatusBarKeyStyle.Render("Press r to reload")+" "+SearchHintStyle.Render("or")+" "+StatusBarKeyStyle.Render("Press Esc to go back"), "")
 		s += "\n  " + StateBoxStyle.Render(errorContent) + "\n"
 		return s
 	}
 	if len(v.images) == 0 {
-		emptyContent := lipgloss.JoinVertical(lipgloss.Left, "", SearchHintStyle.Render("📦 暂无镜像"), "", StatusBarLabelStyle.Render("💡 快速开始:"), "", StatusBarKeyStyle.Render("1.")+" "+SearchHintStyle.Render("拉取一个镜像:"), SearchHintStyle.Render("   docker pull nginx"), "", StatusBarKeyStyle.Render("2.")+" "+SearchHintStyle.Render("刷新镜像列表:"), SearchHintStyle.Render("   按 r 键刷新"), "")
+		emptyContent := lipgloss.JoinVertical(lipgloss.Left, "", SearchHintStyle.Render("📦 No images"), "", StatusBarLabelStyle.Render("💡 Quick start:"), "", StatusBarKeyStyle.Render("1.")+" "+SearchHintStyle.Render("Pull an image:"), SearchHintStyle.Render("   docker pull nginx"), "", StatusBarKeyStyle.Render("2.")+" "+SearchHintStyle.Render("Refresh image list:"), SearchHintStyle.Render("   Press r to refresh"), "")
 		s += "\n  " + StateBoxStyle.Render(emptyContent) + "\n"
 		return s
 	}
@@ -362,7 +362,7 @@ func (v *ListView) View() string {
 	}
 	if !v.isSearching && v.filterType != "all" {
 		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + SearchHintStyle.Render("按 ESC 清除筛选，按 f 切换") + "\n"
+		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + SearchHintStyle.Render("Press ESC to clear filter, press f to switch") + "\n"
 	}
 	if v.taskBar.HasActiveTasks() { v.taskBar.SetWidth(v.width); s += v.taskBar.View() }
 	if v.pullInput.IsVisible() { s = v.overlayPullInput(s) }
@@ -403,8 +403,8 @@ func (v *ListView) renderStatusBar() string {
 	lines = append(lines, "  "+labelStyle.Render("Ops:")+makeItem("<d>", "Delete")+makeItem("<p>", "Prune")+makeItem("<P>", "Pull"))
 	lines = append(lines, "  "+labelStyle.Render("Advanced:")+makeItem("<t>", "Tag")+makeItem("<Space>", "Select")+makeItem("<a>", "All")+makeItem("<E>", "Export"))
 	refreshInfo := "-"; if !v.lastRefreshTime.IsZero() { refreshInfo = FormatDuration(time.Since(v.lastRefreshTime)) + " ago" }
-	row4Info := hintStyle.Render(refreshInfo) + "    " + hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
-	if len(v.selectedImages) > 0 { row4Info += "    " + selectedStyle.Render(fmt.Sprintf("[已选: %d]", len(v.selectedImages))) }
+	row4Info := hintStyle.Render(refreshInfo) + "    " + hintStyle.Render("j/k=Up/Down  Enter=Details  Esc=Back  q=Quit")
+	if len(v.selectedImages) > 0 { row4Info += "    " + selectedStyle.Render(fmt.Sprintf("[Selected: %d]", len(v.selectedImages))) }
 	lines = append(lines, "  "+labelStyle.Render("Last Refresh:")+row4Info)
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
@@ -573,19 +573,19 @@ func (v *ListView) renderConfirmDialogContent() string {
 	var title, warning string
 	if v.confirmAction == "remove" && v.confirmImage != nil {
 		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag; if len(imageName) > 35 { imageName = imageName[:32] + "..." }
-		title = titleStyle.Render("⚠️  删除镜像: " + imageName)
-		warning = warningStyle.Render("此操作不可撤销！")
+		title = titleStyle.Render("⚠️  Delete Image: " + imageName)
+		warning = warningStyle.Render("This action cannot be undone!")
 	} else if v.confirmAction == "force_remove" && v.confirmImage != nil {
 		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag; if len(imageName) > 35 { imageName = imageName[:32] + "..." }
-		title = titleStyle.Render("⚠️  强制删除镜像: " + imageName)
-		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("⚠️  该镜像正在被容器使用！\n") + warningStyle.Render("强制删除可能导致相关容器无法正常运行。\n确定要继续吗？")
+		title = titleStyle.Render("⚠️  Force Delete Image: " + imageName)
+		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("⚠️  This image is being used by containers!\n") + warningStyle.Render("Force deletion may cause related containers to malfunction.\nAre you sure you want to continue?")
 	} else if v.confirmAction == "prune" {
-		title = titleStyle.Render("⚠️  清理悬垂镜像")
-		warning = warningStyle.Render("将删除所有无标签的悬垂镜像，释放磁盘空间")
+		title = titleStyle.Render("⚠️  Prune Dangling Images")
+		warning = warningStyle.Render("Will delete all untagged dangling images to free disk space")
 	} else if v.confirmAction == "pull" && v.confirmPullRef != "" {
 		imageName := v.confirmPullRef; if len(imageName) > 35 { imageName = imageName[:32] + "..." }
-		title = titleStyle.Render("📥  拉取镜像: " + imageName)
-		warning = warningStyle.Render("确认要拉取此镜像吗？")
+		title = titleStyle.Render("📥  Pull Image: " + imageName)
+		warning = warningStyle.Render("Confirm to pull this image?")
 	}
 	buttons := lipgloss.NewStyle().Width(52).Align(lipgloss.Center).Render(cancelBtnStyle.Render("< Cancel >") + "    " + okBtnStyle.Render("< OK >"))
 	content := title + "\n\n" + warning + "\n\n" + buttons
@@ -602,7 +602,7 @@ func (v *ListView) renderConfirmDialogContent() string {
 
 func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
 	image := v.GetSelectedImage()
-	if image == nil { return func() tea.Msg { return ImageOperationErrorMsg{Operation: "删除镜像", Image: "", Err: fmt.Errorf("请先选择一个镜像")} } }
+	if image == nil { return func() tea.Msg { return ImageOperationErrorMsg{Operation: "Delete image", Image: "", Err: fmt.Errorf("please select an image first")} } }
 	v.showConfirmDialog = true; v.confirmAction = "remove"; v.confirmImage = image; v.confirmSelection = 0
 	return nil
 }
@@ -626,9 +626,9 @@ func (v *ListView) removeImage(image *docker.Image, force bool) tea.Cmd {
 			if strings.Contains(errStr, "image is being used") || strings.Contains(errStr, "image has dependent child images") || strings.Contains(errStr, "conflict") {
 				return ImageInUseErrorMsg{Image: image, Err: err}
 			}
-			return ImageOperationErrorMsg{Operation: "删除镜像", Image: image.Repository + ":" + image.Tag, Err: err}
+			return ImageOperationErrorMsg{Operation: "Delete image", Image: image.Repository + ":" + image.Tag, Err: err}
 		}
-		return ImageOperationSuccessMsg{Operation: "删除", Image: image.Repository + ":" + image.Tag}
+		return ImageOperationSuccessMsg{Operation: "Delete", Image: image.Repository + ":" + image.Tag}
 	}
 }
 
@@ -637,8 +637,8 @@ func (v *ListView) pruneImages() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		count, spaceReclaimed, err := v.dockerClient.PruneImages(ctx)
-		if err != nil { return ImageOperationErrorMsg{Operation: "清理悬垂镜像", Image: "", Err: err} }
-		return ImageOperationSuccessMsg{Operation: "清理悬垂镜像", Image: fmt.Sprintf("删除了 %d 个镜像，释放 %s 空间", count, FormatSize(spaceReclaimed))}
+		if err != nil { return ImageOperationErrorMsg{Operation: "Prune dangling images", Image: "", Err: err} }
+		return ImageOperationSuccessMsg{Operation: "Prune dangling images", Image: fmt.Sprintf("Deleted %d images, freed %s space", count, FormatSize(spaceReclaimed))}
 	}
 }
 
@@ -654,13 +654,13 @@ func (v *ListView) startPullTaskSync(imageRef string) {
 	pullTask := task.NewPullTask(v.dockerClient, imageRef)
 	manager := task.GetManager()
 	manager.Submit(pullTask)
-	v.successMsg = fmt.Sprintf("📥 开始拉取: %s", imageRef)
+	v.successMsg = fmt.Sprintf("📥 Start pulling: %s", imageRef)
 	v.successMsgTime = time.Now()
 }
 
 func (v *ListView) showTagInput() tea.Cmd {
 	image := v.GetSelectedImage()
-	if image == nil { return func() tea.Msg { return ImageOperationErrorMsg{Operation: "打标签", Image: "", Err: fmt.Errorf("请先选择一个镜像")} } }
+	if image == nil { return func() tea.Msg { return ImageOperationErrorMsg{Operation: "Tag", Image: "", Err: fmt.Errorf("please select an image first")} } }
 	v.tagInput.SetWidth(v.width)
 	v.tagInput.Show(image.Repository+":"+image.Tag, image.ID, image.Repository, image.Tag)
 	return nil
@@ -672,8 +672,8 @@ func (v *ListView) tagImage(sourceImageID, repository, tag string) tea.Cmd {
 		defer cancel()
 		targetRef := repository + ":" + tag
 		err := v.dockerClient.TagImage(ctx, sourceImageID, repository, tag)
-		if err != nil { return ImageOperationErrorMsg{Operation: "打标签", Image: targetRef, Err: err} }
-		return ImageOperationSuccessMsg{Operation: "打标签", Image: targetRef}
+		if err != nil { return ImageOperationErrorMsg{Operation: "Tag", Image: targetRef, Err: err} }
+		return ImageOperationSuccessMsg{Operation: "Tag", Image: targetRef}
 	}
 }
 
@@ -688,7 +688,7 @@ func (v *ListView) showExportDialog() tea.Cmd {
 		if img != nil { images = append(images, components.ExportImageInfo{ID: img.ID, Repository: img.Repository, Tag: img.Tag}) }
 	}
 	if len(images) == 0 {
-		v.successMsg = "⚠️ 请先选择要导出的镜像"
+		v.successMsg = "⚠️ Please select images to export first"
 		v.successMsgTime = time.Now()
 		return v.clearSuccessMessageAfter(2*time.Second)
 	}
@@ -708,7 +708,7 @@ func (v *ListView) startExportTask(images []components.ExportImageInfo, dir stri
 	exportTask := task.NewExportTask(v.dockerClient, taskImages, dir, taskMode, compress)
 	manager := task.GetManager()
 	manager.Submit(exportTask)
-	v.successMsg = fmt.Sprintf("📤 开始导出 %d 个镜像到 %s", len(images), dir)
+	v.successMsg = fmt.Sprintf("📤 Start exporting %d images to %s", len(images), dir)
 	v.successMsgTime = time.Now()
 	v.selectedImages = make(map[string]bool)
 	v.updateTableData()

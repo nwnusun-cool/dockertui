@@ -156,14 +156,14 @@ func (t *TaskBar) renderCollapsed(tasks []task.Task, width int) string {
 	)
 
 	if len(tasks) > 1 {
-		line += taskBarHintStyle.Render(fmt.Sprintf("  任务: %d", len(tasks)))
+		line += taskBarHintStyle.Render(fmt.Sprintf("  Tasks: %d", len(tasks)))
 	}
 
 	if message != "" && len(line)+len(message) < width-10 {
 		line += "  " + taskBarHintStyle.Render(message)
 	}
 
-	line += "  " + taskBarHintStyle.Render("[T=展开]") + " " + taskBarCancelStyle.Render("[x=取消]")
+	line += "  " + taskBarHintStyle.Render("[T=Expand]") + " " + taskBarCancelStyle.Render("[x=Cancel]")
 
 	separator := taskBarLineStyle.Render(strings.Repeat("─", width))
 
@@ -173,8 +173,8 @@ func (t *TaskBar) renderCollapsed(tasks []task.Task, width int) string {
 func (t *TaskBar) renderExpanded(tasks []task.Task, width int) string {
 	var lines []string
 
-	title := taskBarIconStyle.Render(fmt.Sprintf("后台任务 (%d)", len(tasks))) +
-		"  " + taskBarHintStyle.Render("[T=收起]") + " " + taskBarCancelStyle.Render("[x=取消]")
+	title := taskBarIconStyle.Render(fmt.Sprintf("Background Tasks (%d)", len(tasks))) +
+		"  " + taskBarHintStyle.Render("[T=Collapse]") + " " + taskBarCancelStyle.Render("[x=Cancel]")
 	lines = append(lines, title)
 
 	innerWidth := width - 6

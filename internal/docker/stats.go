@@ -7,62 +7,62 @@ import (
 	"time"
 )
 
-// ContainerStats 容器资源使用统计
+// ContainerStats represents container resource usage statistics
 type ContainerStats struct {
-	Timestamp   time.Time // 采集时间
-	CPUPercent  float64   // CPU 使用率 (%)
-	MemoryUsage uint64    // 内存使用量 (bytes)
-	MemoryLimit uint64    // 内存限制 (bytes)
-	MemoryPercent float64 // 内存使用率 (%)
-	NetworkRx   uint64    // 网络接收 (bytes)
-	NetworkTx   uint64    // 网络发送 (bytes)
-	BlockRead   uint64    // 磁盘读取 (bytes)
-	BlockWrite  uint64    // 磁盘写入 (bytes)
-	PIDs        uint64    // 进程数
+	Timestamp   time.Time // Collection time
+	CPUPercent  float64   // CPU usage (%)
+	MemoryUsage uint64    // Memory usage (bytes)
+	MemoryLimit uint64    // Memory limit (bytes)
+	MemoryPercent float64 // Memory usage percentage (%)
+	NetworkRx   uint64    // Network received (bytes)
+	NetworkTx   uint64    // Network transmitted (bytes)
+	BlockRead   uint64    // Disk read (bytes)
+	BlockWrite  uint64    // Disk write (bytes)
+	PIDs        uint64    // Process count
 }
 
-// ContainerStats 获取容器资源使用统计（单次）
+// ContainerStats gets container resource usage statistics (single snapshot)
 func (c *LocalClient) ContainerStats(ctx context.Context, containerID string) (*ContainerStats, error) {
 	if c == nil || c.cli == nil {
 		return nil, nil
 	}
 
-	// 获取容器统计信息（非流式，只获取一次）
+	// Get container stats (non-streaming, single snapshot)
 	resp, err := c.cli.ContainerStats(ctx, containerID, false)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
+	// Read response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	// 解析 JSON
+	// Parse JSON
 	var statsJSON statsJSON
 	if err := json.Unmarshal(body, &statsJSON); err != nil {
 		return nil, err
 	}
 
-	// 计算 CPU 使用率
+	// Calculate CPU usage
 	cpuPercent := calculateCPUPercent(&statsJSON)
 
-	// 计算内存使用率
+	// Calculate memory usage percentage
 	memoryPercent := 0.0
 	if statsJSON.MemoryStats.Limit > 0 {
 		memoryPercent = float64(statsJSON.MemoryStats.Usage) / float64(statsJSON.MemoryStats.Limit) * 100
 	}
 
-	// 计算网络 I/O
+	// Calculate network I/O
 	var networkRx, networkTx uint64
 	for _, net := range statsJSON.Networks {
 		networkRx += net.RxBytes
 		networkTx += net.TxBytes
 	}
 
-	// 计算磁盘 I/O
+	// Calculate disk I/O
 	var blockRead, blockWrite uint64
 	for _, bio := range statsJSON.BlkioStats.IoServiceBytesRecursive {
 		switch bio.Op {
@@ -87,7 +87,7 @@ func (c *LocalClient) ContainerStats(ctx context.Context, containerID string) (*
 	}, nil
 }
 
-// statsJSON Docker stats API 返回的 JSON 结构
+// statsJSON represents the JSON structure returned by Docker stats API
 type statsJSON struct {
 	CPUStats struct {
 		CPUUsage struct {
@@ -121,7 +121,7 @@ type statsJSON struct {
 	} `json:"pids_stats"`
 }
 
-// calculateCPUPercent 计算 CPU 使用率
+// calculateCPUPercent calculates CPU usage percentage
 func calculateCPUPercent(stats *statsJSON) float64 {
 	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
 	systemDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage)

@@ -156,5 +156,5 @@ func (s *Sparkline) renderEmpty() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("245"))
 
-	return titleStyle.Render(s.Title) + "\n" + hintStyle.Render("  等待数据...")
+	return titleStyle.Render(s.Title) + "\n" + hintStyle.Render("  Waiting for data...")
 }

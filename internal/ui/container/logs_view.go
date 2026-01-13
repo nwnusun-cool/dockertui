@@ -18,7 +18,6 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"docktui/internal/docker"
-	"docktui/internal/i18n"
 	"docktui/internal/ui/components"
 	"docktui/internal/ui/search"
 )
@@ -186,7 +185,7 @@ func (v *LogsView) Update(msg tea.Msg) (*LogsView, tea.Cmd) {
 	case followStoppedMsg:
 		v.followActive = false
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("Follow 停止: %s", msg.err.Error())
+			v.errorMsg = fmt.Sprintf("Follow stopped: %s", msg.err.Error())
 		}
 		return v, nil
 		
@@ -213,9 +212,9 @@ func (v *LogsView) Update(msg tea.Msg) (*LogsView, tea.Cmd) {
 				filename := v.exportInput.Value()
 				if filename != "" {
 					if err := v.exportLogs(filename); err != nil {
-						v.errorMsg = fmt.Sprintf("%s: %s", i18n.T("export_failed"), err.Error())
+						v.errorMsg = fmt.Sprintf("Export failed: %s", err.Error())
 					} else {
-						v.successMsg = fmt.Sprintf("%s: %s", i18n.T("export_success"), filename)
+						v.successMsg = fmt.Sprintf("Exported to: %s", filename)
 					}
 				}
 				return v, nil
@@ -344,13 +343,13 @@ func (v *LogsView) View() string {
 	s.WriteString(v.renderStatusBar())
 	
 	if v.loading {
-		s.WriteString(v.renderStateBox("⏳ 正在加载日志...", "请稍候，正在获取容器日志"))
+		s.WriteString(v.renderStateBox("⏳ Loading logs...", "Please wait, fetching container logs"))
 		s.WriteString(v.renderKeyHints())
 		return s.String()
 	}
 	
 	if v.errorMsg != "" {
-		s.WriteString(v.renderStateBox("❌ 加载失败", v.truncate(v.errorMsg, 50)))
+		s.WriteString(v.renderStateBox("❌ Load failed", v.truncate(v.errorMsg, 50)))
 		s.WriteString(v.renderKeyHints())
 		return s.String()
 	}
@@ -404,11 +403,11 @@ func (v *LogsView) renderSearchBar() string {
 	if v.searchMode {
 		cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
 		content = promptStyle.Render("/") + v.searchInput.Value() + cursor +
-			"  " + infoStyle.Render("["+i18n.T("press_to_confirm")+" "+i18n.T("press_to_cancel")+"]")
+			"  " + infoStyle.Render("[Enter=Confirm ESC=Cancel]")
 	} else if v.searcher.HasMatches() {
 		matchInfo := infoStyle.Render(fmt.Sprintf("[%d/%d]", v.searcher.CurrentIndex(), v.searcher.MatchCount()))
 		content = promptStyle.Render("/"+v.searcher.Query()) + " " + matchStyle.Render(matchInfo) +
-			"  " + hintStyle.Render("n="+i18n.T("search_next")+" N="+i18n.T("search_prev")+" ESC="+i18n.T("search_clear"))
+			"  " + hintStyle.Render("n=Next N=Prev ESC=Clear")
 	}
 	
 	return "\n  " + divider + "\n  " + content + "\n"
@@ -428,8 +427,8 @@ func (v *LogsView) renderExportBar() string {
 	divider := sepStyle.Render(strings.Repeat("─", availableWidth))
 	
 	cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
-	content := promptStyle.Render("📁 "+i18n.T("export_to")+": ") + v.exportInput.Value() + cursor +
-		"  " + infoStyle.Render("["+i18n.T("press_to_confirm")+" "+i18n.T("press_to_cancel")+"]")
+	content := promptStyle.Render("📁 Export to: ") + v.exportInput.Value() + cursor +
+		"  " + infoStyle.Render("[Enter=Confirm ESC=Cancel]")
 	
 	return "\n  " + divider + "\n  " + content + "\n"
 }
@@ -448,7 +447,7 @@ func (v *LogsView) renderHeader() string {
 		Background(lipgloss.Color("57")).
 		Padding(0, 1)
 	
-	title := titleStyle.Render("📜 " + i18n.T("logs") + ": " + v.containerName)
+	title := titleStyle.Render("📜 Logs: " + v.containerName)
 	
 	lineWidth := v.width - 4
 	if lineWidth < 60 {
@@ -490,9 +489,9 @@ func (v *LogsView) renderStatusBar() string {
 	
 	sep := sepStyle.Render("  │  ")
 	
-	status := labelStyle.Render(i18n.T("follow")+":") + " " + followStatus + sep +
-		labelStyle.Render(i18n.T("wrap")+":") + " " + wrapStatus + sep +
-		labelStyle.Render(i18n.T("lines")+":") + " " + valueStyle.Render(fmt.Sprintf("%d", len(v.logs)))
+	status := labelStyle.Render("Follow:") + " " + followStatus + sep +
+		labelStyle.Render("Wrap:") + " " + wrapStatus + sep +
+		labelStyle.Render("Lines:") + " " + valueStyle.Render(fmt.Sprintf("%d", len(v.logs)))
 	
 	if v.followMode && v.followActive && !v.lastRefreshTime.IsZero() {
 		status += sep + offStyle.Render("Latest: "+v.lastRefreshTime.Format("15:04:05"))
@@ -547,7 +546,7 @@ func (v *LogsView) renderEmptyState() string {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 	
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		hintStyle.Render("📭 "+i18n.T("no_logs")),
+		hintStyle.Render("📭 No logs"),
 		"",
 		titleStyle.Render("Possible reasons:"),
 		hintStyle.Render("  • Container just started, no logs yet"),
@@ -574,14 +573,14 @@ func (v *LogsView) renderKeyHints() string {
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	
 	items := []struct{ key, desc string }{
-		{"j/k", i18n.T("scroll_hint")},
-		{"g/G", i18n.T("jump_hint")},
-		{"/", i18n.T("search")},
-		{"e", i18n.T("export")},
-		{"f", i18n.T("follow")},
-		{"w", i18n.T("wrap")},
-		{"r", i18n.T("refresh")},
-		{"Esc", i18n.T("back")},
+		{"j/k", "Scroll"},
+		{"g/G", "Top/Bottom"},
+		{"/", "Search"},
+		{"e", "Export"},
+		{"f", "Follow"},
+		{"w", "Wrap"},
+		{"r", "Refresh"},
+		{"Esc", "Back"},
 	}
 	
 	var parts []string
@@ -602,7 +601,7 @@ func (v *LogsView) renderKeyHints() string {
 // formatLogs 格式化日志内容
 func (v *LogsView) formatLogs() string {
 	if len(v.logs) == 0 {
-		return "暂无日志"
+		return "No logs"
 	}
 	
 	lineNumStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -748,7 +747,7 @@ func (v *LogsView) processLogLine(line string) string {
 // loadLogs 加载容器日志
 func (v *LogsView) loadLogs() tea.Msg {
 	if v.containerID == "" {
-		return logsLoadErrorMsg{err: fmt.Errorf("容器 ID 为空")}
+		return logsLoadErrorMsg{err: fmt.Errorf("container ID is empty")}
 	}
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -769,7 +768,7 @@ func (v *LogsView) loadLogs() tea.Msg {
 	var stdout, stderr bytes.Buffer
 	_, err = stdcopy.StdCopy(&stdout, &stderr, logReader)
 	if err != nil && err != io.EOF {
-		return logsLoadErrorMsg{err: fmt.Errorf("解析日志流失败: %w", err)}
+		return logsLoadErrorMsg{err: fmt.Errorf("failed to parse log stream: %w", err)}
 	}
 	
 	var logs []string
@@ -794,11 +793,11 @@ func (v *LogsView) loadLogs() tea.Msg {
 	}
 	
 	if err := stdoutScanner.Err(); err != nil {
-		return logsLoadErrorMsg{err: fmt.Errorf("读取 stdout 失败: %w", err)}
+		return logsLoadErrorMsg{err: fmt.Errorf("failed to read stdout: %w", err)}
 	}
 	
 	if err := stderrScanner.Err(); err != nil {
-		return logsLoadErrorMsg{err: fmt.Errorf("读取 stderr 失败: %w", err)}
+		return logsLoadErrorMsg{err: fmt.Errorf("failed to read stderr: %w", err)}
 	}
 	
 	return logsLoadedMsg{logs: logs}
@@ -860,7 +859,7 @@ func (v *LogsView) listenForLogs() tea.Cmd {
 func (v *LogsView) readLogStream() tea.Cmd {
 	return func() tea.Msg {
 		if v.containerID == "" {
-			return followStoppedMsg{err: fmt.Errorf("容器 ID 为空")}
+			return followStoppedMsg{err: fmt.Errorf("container ID is empty")}
 		}
 		
 		ctx, cancel := context.WithCancel(context.Background())

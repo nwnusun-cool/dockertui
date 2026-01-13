@@ -43,25 +43,25 @@ func TestLocalClient_NilCheck(t *testing.T) {
 	var client *LocalClient
 	ctx := context.Background()
 
-	// 测试 Ping
+	// Test Ping
 	err := client.Ping(ctx)
 	if err == nil {
 		t.Error("Expected error for nil client Ping, got nil")
 	}
-	if err.Error() != "Docker 客户端未初始化" {
-		t.Errorf("Expected '客户端未初始化' error, got: %v", err)
+	if err.Error() != "Docker client not initialized" {
+		t.Errorf("Expected 'client not initialized' error, got: %v", err)
 	}
 
-	// 测试 ListContainers
+	// Test ListContainers
 	_, err = client.ListContainers(ctx, true)
 	if err == nil {
 		t.Error("Expected error for nil client ListContainers, got nil")
 	}
-	if err.Error() != "Docker 客户端未初始化" {
-		t.Errorf("Expected '客户端未初始化' error, got: %v", err)
+	if err.Error() != "Docker client not initialized" {
+		t.Errorf("Expected 'client not initialized' error, got: %v", err)
 	}
 
-	// 测试 Close
+	// Test Close
 	err = client.Close()
 	if err != nil {
 		t.Errorf("Expected nil error for nil client Close, got: %v", err)
@@ -70,8 +70,8 @@ func TestLocalClient_NilCheck(t *testing.T) {
 
 // TestLocalClient_UnimplementedMethods 测试尚未实现的方法返回正确的错误
 func TestLocalClient_UnimplementedMethods(t *testing.T) {
-	// 注意：空的 LocalClient 会先检查 cli 是否为 nil
-	// 所以即使方法未实现，也会返回"客户端未初始化"错误
+	// Note: empty LocalClient will first check if cli is nil
+	// So even if method is not implemented, it will return "client not initialized" error
 	client := &LocalClient{}
 	ctx := context.Background()
 
@@ -80,9 +80,9 @@ func TestLocalClient_UnimplementedMethods(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for unimplemented ContainerDetails, got nil")
 	}
-	// 空客户端会返回"未初始化"或"尚未实现"
-	if err.Error() != "Docker 客户端未初始化" && err.Error() != "容器详情获取功能尚未实现" {
-		t.Errorf("Expected '未初始化' or '尚未实现' error, got: %v", err)
+	// Empty client will return "not initialized" or "not implemented" error
+	if err.Error() != "Docker client not initialized" && err.Error() != "container details not implemented" {
+		t.Errorf("Expected 'not initialized' or 'not implemented' error, got: %v", err)
 	}
 
 	// 测试 ContainerLogs
@@ -90,8 +90,8 @@ func TestLocalClient_UnimplementedMethods(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for unimplemented ContainerLogs, got nil")
 	}
-	if err.Error() != "Docker 客户端未初始化" && err.Error() != "日志读取功能尚未实现" {
-		t.Errorf("Expected '未初始化' or '尚未实现' error, got: %v", err)
+	if err.Error() != "Docker client not initialized" && err.Error() != "log reading not implemented" {
+		t.Errorf("Expected 'not initialized' or 'not implemented' error, got: %v", err)
 	}
 
 	// 测试 ExecShell
@@ -99,8 +99,8 @@ func TestLocalClient_UnimplementedMethods(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for unimplemented ExecShell, got nil")
 	}
-	if err.Error() != "Docker 客户端未初始化" && err.Error() != "exec shell 功能尚未实现" {
-		t.Errorf("Expected '未初始化' or '尚未实现' error, got: %v", err)
+	if err.Error() != "Docker client not initialized" && err.Error() != "exec shell not implemented" {
+		t.Errorf("Expected 'not initialized' or 'not implemented' error, got: %v", err)
 	}
 }
 

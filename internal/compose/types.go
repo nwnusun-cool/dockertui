@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-// ProjectStatus 项目状态
+// ProjectStatus represents project status
 type ProjectStatus int
 
 const (
 	StatusUnknown ProjectStatus = iota
-	StatusRunning               // 所有服务运行中
-	StatusPartial               // 部分服务运行中
-	StatusStopped               // 所有服务已停止
-	StatusError                 // 错误状态
+	StatusRunning               // All services running
+	StatusPartial               // Some services running
+	StatusStopped               // All services stopped
+	StatusError                 // Error state
 )
 
-// String 返回状态的字符串表示
+// String returns the string representation of the status
 func (s ProjectStatus) String() string {
 	switch s {
 	case StatusRunning:
@@ -32,33 +32,33 @@ func (s ProjectStatus) String() string {
 	}
 }
 
-// Project 表示一个 docker-compose 项目
+// Project represents a docker-compose project
 type Project struct {
-	Name         string            // 项目名称
-	Path         string            // 项目根目录绝对路径
-	ComposeFiles []string          // compose 文件列表（相对路径）
-	EnvFiles     []string          // 环境变量文件列表
-	WorkingDir   string            // 工作目录
-	Labels       map[string]string // 项目标签
+	Name         string            // Project name
+	Path         string            // Project root directory absolute path
+	ComposeFiles []string          // Compose file list (relative paths)
+	EnvFiles     []string          // Environment variable file list
+	WorkingDir   string            // Working directory
+	Labels       map[string]string // Project labels
 
-	// 运行时状态
-	Services    []Service     // 服务列表
-	Status      ProjectStatus // 项目状态
-	LastUpdated time.Time     // 最后更新时间
+	// Runtime state
+	Services    []Service     // Service list
+	Status      ProjectStatus // Project status
+	LastUpdated time.Time     // Last updated time
 }
 
-// Service 表示 compose 项目中的一个服务
+// Service represents a service in a compose project
 type Service struct {
-	Name       string   // 服务名称
-	Image      string   // 镜像名称
-	State      string   // 状态：running/exited/restarting/paused
-	Containers []string // 容器 ID 列表
-	Replicas   int      // 副本数量
-	Running    int      // 运行中的副本数
-	Ports      []string // 端口映射
+	Name       string   // Service name
+	Image      string   // Image name
+	State      string   // State: running/exited/restarting/paused
+	Containers []string // Container ID list
+	Replicas   int      // Replica count
+	Running    int      // Running replica count
+	Ports      []string // Port mappings
 }
 
-// PortMapping 端口映射
+// PortMapping represents port mapping
 type PortMapping struct {
 	HostIP        string
 	HostPort      int
@@ -66,72 +66,72 @@ type PortMapping struct {
 	Protocol      string
 }
 
-// UpOptions 启动项目的选项
+// UpOptions represents options for starting a project
 type UpOptions struct {
-	Detach        bool     // 后台运行（-d）
-	Build         bool     // 构建镜像（--build）
-	ForceRecreate bool     // 强制重建（--force-recreate）
-	NoDeps        bool     // 不启动依赖服务（--no-deps）
-	Services      []string // 指定服务（为空则启动所有）
-	Timeout       int      // 超时时间（秒）
-	Pull          string   // 拉取策略：always/missing/never
+	Detach        bool     // Run in background (-d)
+	Build         bool     // Build images (--build)
+	ForceRecreate bool     // Force recreate (--force-recreate)
+	NoDeps        bool     // Don't start dependencies (--no-deps)
+	Services      []string // Specific services (empty for all)
+	Timeout       int      // Timeout in seconds
+	Pull          string   // Pull policy: always/missing/never
 }
 
-// DownOptions 停止项目的选项
+// DownOptions represents options for stopping a project
 type DownOptions struct {
-	RemoveVolumes bool // 删除卷（-v）
-	RemoveOrphans bool // 删除孤立容器（--remove-orphans）
-	RemoveImages  string // 删除镜像：all/local（空表示不删除）
-	Timeout       int  // 超时时间（秒）
+	RemoveVolumes bool   // Remove volumes (-v)
+	RemoveOrphans bool   // Remove orphan containers (--remove-orphans)
+	RemoveImages  string // Remove images: all/local (empty for none)
+	Timeout       int    // Timeout in seconds
 }
 
-// LogOptions 日志选项
+// LogOptions represents log options
 type LogOptions struct {
-	Follow     bool     // 跟踪模式（-f）
-	Tail       int      // 显示最后 N 行（0 表示全部）
-	Timestamps bool     // 显示时间戳（-t）
-	Services   []string // 指定服务（为空则显示所有）
-	Since      string   // 起始时间
-	Until      string   // 结束时间
+	Follow     bool     // Follow mode (-f)
+	Tail       int      // Show last N lines (0 for all)
+	Timestamps bool     // Show timestamps (-t)
+	Services   []string // Specific services (empty for all)
+	Since      string   // Start time
+	Until      string   // End time
 }
 
-// BuildOptions 构建选项
+// BuildOptions represents build options
 type BuildOptions struct {
-	NoCache  bool     // 不使用缓存（--no-cache）
-	Pull     bool     // 拉取基础镜像（--pull）
-	Services []string // 指定服务
+	NoCache  bool     // Don't use cache (--no-cache)
+	Pull     bool     // Pull base images (--pull)
+	Services []string // Specific services
 }
 
-// PullOptions 拉取选项
+// PullOptions represents pull options
 type PullOptions struct {
-	IgnorePullFailures bool     // 忽略拉取失败
-	Services           []string // 指定服务
+	IgnorePullFailures bool     // Ignore pull failures
+	Services           []string // Specific services
 }
 
-// OperationResult 操作结果
+// OperationResult represents operation result
 type OperationResult struct {
-	Success  bool          // 是否成功
-	Message  string        // 消息
-	Output   string        // stdout 输出
-	Error    string        // stderr 输出
-	ExitCode int           // 退出码
-	Duration time.Duration // 耗时
+	Success  bool          // Whether successful
+	Message  string        // Message
+	Output   string        // stdout output
+	Error    string        // stderr output
+	ExitCode int           // Exit code
+	Duration time.Duration // Duration
 }
 
-// ErrorType 错误类型
+// ErrorType represents error type
 type ErrorType int
 
 const (
 	ErrorUnknown ErrorType = iota
-	ErrorConfig            // compose 文件配置错误
-	ErrorNetwork           // 网络错误（端口冲突等）
-	ErrorImage             // 镜像相关错误
-	ErrorRuntime           // 运行时错误
-	ErrorPermission        // 权限错误
-	ErrorNotFound          // 命令或文件未找到
+	ErrorConfig            // Compose file configuration error
+	ErrorNetwork           // Network error (port conflict, etc.)
+	ErrorImage             // Image related error
+	ErrorRuntime           // Runtime error
+	ErrorPermission        // Permission error
+	ErrorNotFound          // Command or file not found
 )
 
-// ComposeError compose 操作错误
+// ComposeError represents compose operation error
 type ComposeError struct {
 	Type       ErrorType
 	Message    string
@@ -139,7 +139,7 @@ type ComposeError struct {
 	Suggestion string
 }
 
-// Error 实现 error 接口
+// Error implements the error interface
 func (e *ComposeError) Error() string {
 	if e.Details != "" {
 		return e.Message + ": " + e.Details
@@ -147,13 +147,13 @@ func (e *ComposeError) Error() string {
 	return e.Message
 }
 
-// Client docker-compose 客户端接口
+// Client represents docker-compose client interface
 type Client interface {
-	// 版本信息
+	// Version info
 	Version() (string, error)
-	CommandType() string // 返回 "docker compose" 或 "docker-compose"
+	CommandType() string // Returns "docker compose" or "docker-compose"
 
-	// 项目操作
+	// Project operations
 	Up(project *Project, opts UpOptions) (*OperationResult, error)
 	Down(project *Project, opts DownOptions) (*OperationResult, error)
 	Start(project *Project, services []string) (*OperationResult, error)
@@ -162,12 +162,12 @@ type Client interface {
 	Pause(project *Project, services []string) (*OperationResult, error)
 	Unpause(project *Project, services []string) (*OperationResult, error)
 
-	// 信息查询
+	// Information queries
 	PS(project *Project) ([]Service, error)
 	Logs(project *Project, opts LogOptions) (io.ReadCloser, error)
 	Config(project *Project) (string, error)
 
-	// 镜像操作
+	// Image operations
 	Build(project *Project, opts BuildOptions) (*OperationResult, error)
 	Pull(project *Project, opts PullOptions) (*OperationResult, error)
 }

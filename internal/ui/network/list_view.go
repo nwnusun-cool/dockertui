@@ -92,7 +92,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 			return v, cmd
 		case NetworkCreateSuccessMsg:
 			v.showCreateView = false
-			v.successMsg = fmt.Sprintf("✅ 网络创建成功: %s", msg.NetworkID[:12])
+			v.successMsg = fmt.Sprintf("✅ Network created: %s", msg.NetworkID[:12])
 			v.successMsgTime = time.Now()
 			v.createView.Reset()
 			return v, tea.Batch(v.loadNetworks, v.clearSuccessMessageAfter(3*time.Second))
@@ -115,12 +115,12 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		v.errorMsg = msg.Err.Error()
 		return v, nil
 	case NetworkOperationSuccessMsg:
-		v.successMsg = fmt.Sprintf("✅ %s成功: %s", msg.Operation, msg.Network)
+		v.successMsg = fmt.Sprintf("✅ %s succeeded: %s", msg.Operation, msg.Network)
 		v.successMsgTime = time.Now()
 		v.errorMsg = ""
 		return v, tea.Batch(v.loadNetworks, v.clearSuccessMessageAfter(3*time.Second))
 	case NetworkOperationErrorMsg:
-		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s失败: %v", msg.Operation, msg.Err)) }
+		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s failed: %v", msg.Operation, msg.Err)) }
 		return v, nil
 	case ClearSuccessMessageMsg:
 		if time.Since(v.successMsgTime) >= 3*time.Second { v.successMsg = "" }
@@ -132,7 +132,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		}
 		return v, nil
 	case NetworkInspectErrorMsg:
-		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("获取网络信息失败: %v", msg.Err)) }
+		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("Failed to get network info: %v", msg.Err)) }
 		return v, nil
 	case tea.KeyMsg:
 		if v.errorDialog != nil && v.errorDialog.IsVisible() { if v.errorDialog.Update(msg) { return v, nil } }
@@ -247,18 +247,18 @@ func (v *ListView) View() string {
 	}
 	s += v.renderStatsBar()
 	if v.loading {
-		loadingContent := lipgloss.JoinVertical(lipgloss.Center, "", DriverStyle.Render("⏳ 正在加载网络列表..."), "", BuiltInStyle.Render("请稍候，正在从 Docker 获取数据"), "")
+		loadingContent := lipgloss.JoinVertical(lipgloss.Center, "", DriverStyle.Render("⏳ Loading network list..."), "", BuiltInStyle.Render("Please wait, fetching data from Docker"), "")
 		s += "\n  " + StateBoxStyle.Render(loadingContent) + "\n"
 		return s
 	}
 	if v.errorMsg != "" {
 		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-		errorContent := lipgloss.JoinVertical(lipgloss.Left, "", errorStyle.Render("❌ 加载失败: "+v.errorMsg), "", TitleStyle.Render("💡 可能的原因:"), BuiltInStyle.Render("   • Docker 守护进程未运行"), BuiltInStyle.Render("   • 网络连接问题"), "", DriverStyle.Render("按 r 重新加载"), "")
+		errorContent := lipgloss.JoinVertical(lipgloss.Left, "", errorStyle.Render("❌ Load failed: "+v.errorMsg), "", TitleStyle.Render("💡 Possible reasons:"), BuiltInStyle.Render("   • Docker daemon not running"), BuiltInStyle.Render("   • Network connection issue"), "", DriverStyle.Render("Press r to reload"), "")
 		s += "\n  " + StateBoxStyle.Render(errorContent) + "\n"
 		return s
 	}
 	if len(v.networks) == 0 {
-		emptyContent := lipgloss.JoinVertical(lipgloss.Left, "", BuiltInStyle.Render("🌐 暂无自定义网络"), "", TitleStyle.Render("💡 快速开始:"), "", DriverStyle.Render("1.")+BuiltInStyle.Render(" 创建一个网络:"), BuiltInStyle.Render("   docker network create my-network"), "", DriverStyle.Render("2.")+BuiltInStyle.Render(" 或按 c 键创建网络"), "", DriverStyle.Render("3.")+BuiltInStyle.Render(" 刷新网络列表:"), BuiltInStyle.Render("   按 r 键刷新"), "")
+		emptyContent := lipgloss.JoinVertical(lipgloss.Left, "", BuiltInStyle.Render("🌐 No custom networks"), "", TitleStyle.Render("💡 Quick start:"), "", DriverStyle.Render("1.")+BuiltInStyle.Render(" Create a network:"), BuiltInStyle.Render("   docker network create my-network"), "", DriverStyle.Render("2.")+BuiltInStyle.Render(" Or press c to create network"), "", DriverStyle.Render("3.")+BuiltInStyle.Render(" Refresh network list:"), BuiltInStyle.Render("   Press r to refresh"), "")
 		s += "\n  " + StateBoxStyle.Render(emptyContent) + "\n"
 		return s
 	}
@@ -302,7 +302,7 @@ func (v *ListView) renderStatusBar() string {
 	filterInfo := ""; if v.filterDriver != "all" { filterInfo = " [Filter: " + v.filterDriver + "]" }
 	sortNames := []string{"Name", "Driver", "Created", "Containers"}
 	sortInfo := " [Sort: " + sortNames[v.sortField] + "]"
-	lines = append(lines, "  "+labelStyle.Render("Last Refresh:")+hintStyle.Render(refreshInfo+filterInfo+sortInfo)+"    "+hintStyle.Render("j/k=上下  Enter=详情  s=排序  Esc=返回  q=退出"))
+	lines = append(lines, "  "+labelStyle.Render("Last Refresh:")+hintStyle.Render(refreshInfo+filterInfo+sortInfo)+"    "+hintStyle.Render("j/k=Up/Down  Enter=Details  s=Sort  Esc=Back  q=Quit"))
 	return "\n" + strings.Join(lines, "\n") + "\n"
 }
 
@@ -397,8 +397,8 @@ func (v *ListView) GetSelectedNetwork() *docker.Network {
 func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
 	network := v.GetSelectedNetwork()
 	if network == nil { return nil }
-	if network.IsBuiltIn { if v.errorDialog != nil { v.errorDialog.ShowError("无法删除内置网络: " + network.Name) }; return nil }
-	if network.ContainerCount > 0 { if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("网络 %s 仍有 %d 个容器连接，请先断开连接", network.Name, network.ContainerCount)) }; return nil }
+	if network.IsBuiltIn { if v.errorDialog != nil { v.errorDialog.ShowError("Cannot delete built-in network: " + network.Name) }; return nil }
+	if network.ContainerCount > 0 { if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("Network %s still has %d containers connected, please disconnect first", network.Name, network.ContainerCount)) }; return nil }
 	v.showConfirmDialog = true; v.confirmAction = "remove"; v.confirmNetwork = network; v.confirmSelection = 0
 	return nil
 }
@@ -417,8 +417,8 @@ func (v *ListView) removeNetwork(network *docker.Network) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err := v.dockerClient.RemoveNetwork(ctx, network.ID)
-		if err != nil { return NetworkOperationErrorMsg{Operation: "删除网络", Err: err} }
-		return NetworkOperationSuccessMsg{Operation: "删除网络", Network: network.Name}
+		if err != nil { return NetworkOperationErrorMsg{Operation: "Delete network", Err: err} }
+		return NetworkOperationSuccessMsg{Operation: "Delete network", Network: network.Name}
 	}
 }
 
@@ -427,9 +427,9 @@ func (v *ListView) pruneNetworks() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		deleted, err := v.dockerClient.PruneNetworks(ctx)
-		if err != nil { return NetworkOperationErrorMsg{Operation: "清理网络", Err: err} }
-		if len(deleted) == 0 { return NetworkOperationSuccessMsg{Operation: "清理网络", Network: "无未使用的网络"} }
-		return NetworkOperationSuccessMsg{Operation: "清理网络", Network: fmt.Sprintf("已删除 %d 个网络", len(deleted))}
+		if err != nil { return NetworkOperationErrorMsg{Operation: "Prune networks", Err: err} }
+		if len(deleted) == 0 { return NetworkOperationSuccessMsg{Operation: "Prune networks", Network: "No unused networks"} }
+		return NetworkOperationSuccessMsg{Operation: "Prune networks", Network: fmt.Sprintf("Deleted %d networks", len(deleted))}
 	}
 }
 
@@ -462,7 +462,7 @@ func (v *ListView) renderConfirmDialogContent() string {
 	okBtnStyle := lipgloss.NewStyle().Padding(0, 2)
 	if v.confirmSelection == 0 { cancelBtnStyle = cancelBtnStyle.Reverse(true).Bold(true); okBtnStyle = okBtnStyle.Foreground(lipgloss.Color("245")) } else { cancelBtnStyle = cancelBtnStyle.Foreground(lipgloss.Color("245")); okBtnStyle = okBtnStyle.Reverse(true).Bold(true) }
 	var title, warning string
-	if v.confirmAction == "remove" && v.confirmNetwork != nil { title = "🗑️  确认删除网络"; warning = fmt.Sprintf("确定要删除网络 \"%s\" 吗？", v.confirmNetwork.Name) } else if v.confirmAction == "prune" { title = "🧹  确认清理网络"; warning = "确定要清理所有未使用的网络吗？\n此操作不可撤销。" }
+	if v.confirmAction == "remove" && v.confirmNetwork != nil { title = "🗑️  Confirm Delete Network"; warning = fmt.Sprintf("Are you sure you want to delete network \"%s\"?", v.confirmNetwork.Name) } else if v.confirmAction == "prune" { title = "🧹  Confirm Prune Networks"; warning = "Are you sure you want to prune all unused networks?\nThis action cannot be undone." }
 	buttons := lipgloss.JoinHorizontal(lipgloss.Center, cancelBtnStyle.Render("[ Cancel ]"), "    ", okBtnStyle.Render("[   OK   ]"))
 	content := lipgloss.JoinVertical(lipgloss.Center, "", titleStyle.Render(title), "", warningStyle.Render(warning), "", buttons, "")
 	leftPadding := (v.width - 60) / 2; if leftPadding < 0 { leftPadding = 0 }
@@ -492,7 +492,7 @@ func (v *ListView) renderFilterMenuContent() string {
 		if i == v.filterDriverIndex { prefix = "▶ "; style = selectedStyle }
 		items = append(items, prefix+style.Render(fmt.Sprintf("[%s] %s", opt.key, opt.label)))
 	}
-	content := lipgloss.JoinVertical(lipgloss.Left, titleStyle.Render("🔍 Filter by Driver"), "", strings.Join(items, "\n"), "", hintStyle.Render("j/k=上下  Enter=确认  Esc=取消"))
+	content := lipgloss.JoinVertical(lipgloss.Left, titleStyle.Render("🔍 Filter by Driver"), "", strings.Join(items, "\n"), "", hintStyle.Render("j/k=Up/Down  Enter=Confirm  Esc=Cancel"))
 	leftPadding := (v.width - 44) / 2; if leftPadding < 0 { leftPadding = 0 }
 	return strings.Repeat(" ", leftPadding) + menuStyle.Render(content)
 }

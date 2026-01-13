@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"docktui/internal/docker"
+	"docktui/internal/ui/components"
 )
 
 // DetailsTab 镜像详情标签页类型
@@ -95,7 +96,7 @@ func (v *DetailsView) View() string {
 	}
 	s.WriteString("\n  " + DetailsTitleStyle.Render(title) + "\n\n")
 	s.WriteString(v.renderTabs() + "\n")
-	if v.loading { s.WriteString("\n  " + DetailsHintStyle.Render("⏳ 正在加载镜像详情...") + "\n"); return s.String() }
+	if v.loading { s.WriteString("\n  " + DetailsHintStyle.Render("⏳ Loading image details...") + "\n"); return s.String() }
 	if v.errorMsg != "" { s.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("❌ "+v.errorMsg) + "\n"); return s.String() }
 	s.WriteString(v.renderCurrentTab())
 	s.WriteString("\n" + v.renderHints())
@@ -131,7 +132,7 @@ func (v *DetailsView) renderCurrentTab() string {
 }
 
 func (v *DetailsView) renderBasicInfo() string {
-	if v.image == nil { return "\n  " + DetailsHintStyle.Render("无镜像信息") }
+	if v.image == nil { return "\n  " + DetailsHintStyle.Render("No image info") }
 	var lines []string
 	if v.details != nil {
 		lines = append(lines, v.formatLine("IMAGE ID", v.details.ID))
@@ -160,7 +161,7 @@ func (v *DetailsView) renderBasicInfo() string {
 func (v *DetailsView) renderUsage() string {
 	var lines []string
 	if v.image != nil {
-		if v.image.InUse { lines = append(lines, v.formatLine("STATUS", "🟢 In Use")) } else if v.image.Dangling { lines = append(lines, v.formatLine("STATUS", "🟡 Dangling (无标签)")) } else { lines = append(lines, v.formatLine("STATUS", "🔴 Unused")) }
+		if v.image.InUse { lines = append(lines, v.formatLine("STATUS", "🟢 In Use")) } else if v.image.Dangling { lines = append(lines, v.formatLine("STATUS", "🟡 Dangling (no tag)")) } else { lines = append(lines, v.formatLine("STATUS", "🔴 Unused")) }
 	}
 	if v.details != nil && len(v.details.Containers) > 0 {
 		lines = append(lines, "", DetailsLabelStyle.Render("CONTAINERS:")+" ("+fmt.Sprintf("%d", len(v.details.Containers))+")")
@@ -184,13 +185,13 @@ func (v *DetailsView) renderUsage() string {
 			shortID := containerID; if len(shortID) > 12 { shortID = shortID[:12] }
 			lines = append(lines, "  • "+shortID)
 		}
-	} else { lines = append(lines, "", DetailsHintStyle.Render("没有容器使用此镜像")) }
+	} else { lines = append(lines, "", DetailsHintStyle.Render("No containers using this image")) }
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox("Usage Status", strings.Join(lines, "\n"), boxWidth)
 }
 
 func (v *DetailsView) renderConfig() string {
-	if v.details == nil { return "\n  " + DetailsHintStyle.Render("无配置信息") }
+	if v.details == nil { return "\n  " + DetailsHintStyle.Render("No config info") }
 	var lines []string
 	if len(v.details.Entrypoint) > 0 { lines = append(lines, v.formatLine("ENTRYPOINT", strings.Join(v.details.Entrypoint, " "))) } else { lines = append(lines, v.formatLine("ENTRYPOINT", "(none)")) }
 	if len(v.details.Cmd) > 0 { lines = append(lines, v.formatLine("CMD", strings.Join(v.details.Cmd, " "))) } else { lines = append(lines, v.formatLine("CMD", "(none)")) }
@@ -203,7 +204,7 @@ func (v *DetailsView) renderConfig() string {
 }
 
 func (v *DetailsView) renderEnvVars() string {
-	if v.details == nil || len(v.details.Env) == 0 { return "\n  " + DetailsHintStyle.Render("无环境变量") }
+	if v.details == nil || len(v.details.Env) == 0 { return "\n  " + DetailsHintStyle.Render("No environment variables") }
 	var lines []string
 	envCount := len(v.details.Env)
 	maxLines := v.height - 15; if maxLines < 5 { maxLines = 5 }
@@ -219,14 +220,14 @@ func (v *DetailsView) renderEnvVars() string {
 		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, envCount)
 		if v.scrollOffset > 0 { scrollInfo += "↑ " }
 		if v.scrollOffset < v.maxScroll { scrollInfo += "↓" }
-		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k 滚动"))
+		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k scroll"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox(fmt.Sprintf("Environment Variables (%d)", envCount), strings.Join(lines, "\n"), boxWidth)
 }
 
 func (v *DetailsView) renderHistory() string {
-	if v.details == nil || len(v.details.History) == 0 { return "\n  " + DetailsHintStyle.Render("无构建历史信息") }
+	if v.details == nil || len(v.details.History) == 0 { return "\n  " + DetailsHintStyle.Render("No build history") }
 	var lines []string
 	historyCount := len(v.details.History)
 	maxItems := (v.height - 15) / 3; if maxItems < 3 { maxItems = 3 }
@@ -255,14 +256,14 @@ func (v *DetailsView) renderHistory() string {
 		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, historyCount)
 		if v.scrollOffset > 0 { scrollInfo += "↑ " }
 		if v.scrollOffset < v.maxScroll { scrollInfo += "↓" }
-		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k 滚动"))
+		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k scroll"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox(fmt.Sprintf("Build History (%d)", historyCount), strings.Join(lines, "\n"), boxWidth)
 }
 
 func (v *DetailsView) renderLabels() string {
-	if v.details == nil || len(v.details.Labels) == 0 { return "\n  " + DetailsHintStyle.Render("无标签信息") }
+	if v.details == nil || len(v.details.Labels) == 0 { return "\n  " + DetailsHintStyle.Render("No labels") }
 	var lines []string
 	var labelPairs []string
 	for k, val := range v.details.Labels { labelPairs = append(labelPairs, k+"="+val) }
@@ -280,7 +281,7 @@ func (v *DetailsView) renderLabels() string {
 		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, labelCount)
 		if v.scrollOffset > 0 { scrollInfo += "↑ " }
 		if v.scrollOffset < v.maxScroll { scrollInfo += "↓" }
-		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k 滚动"))
+		lines = append(lines, "", DetailsHintStyle.Render(scrollInfo+"  j/k scroll"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox(fmt.Sprintf("Labels (%d)", labelCount), strings.Join(lines, "\n"), boxWidth)
@@ -288,10 +289,10 @@ func (v *DetailsView) renderLabels() string {
 
 func (v *DetailsView) renderHints() string {
 	hints := []string{
-		DetailsKeyStyle.Render("<Tab/←/→>") + " 切换标签",
-		DetailsKeyStyle.Render("<1-6>") + " 快速跳转",
-		DetailsKeyStyle.Render("<j/k>") + " 滚动",
-		DetailsKeyStyle.Render("<Esc>") + " 返回",
+		DetailsKeyStyle.Render("<Tab/←/→>") + " Switch tabs",
+		DetailsKeyStyle.Render("<1-6>") + " Quick jump",
+		DetailsKeyStyle.Render("<j/k>") + " Scroll",
+		DetailsKeyStyle.Render("<Esc>") + " Back",
 	}
 	return "  " + DetailsHintStyle.Render(strings.Join(hints, "  │  "))
 }
@@ -301,13 +302,11 @@ func (v *DetailsView) formatLine(label, value string) string {
 }
 
 func (v *DetailsView) wrapInBox(title, content string, width int) string {
-	boxStyle := DetailsBoxStyle.Width(width)
-	titleLine := "  " + DetailsTitleStyle.Render("─ "+title+" ") + DetailsHintStyle.Render(strings.Repeat("─", width-len(title)-6))
-	return titleLine + "\n" + boxStyle.Render(content)
+	return components.WrapInBox(title, content, width)
 }
 
 func (v *DetailsView) loadImageDetails() tea.Msg {
-	if v.image == nil { return ImageDetailsLoadErrorMsg{Err: fmt.Errorf("镜像信息为空")} }
+	if v.image == nil { return ImageDetailsLoadErrorMsg{Err: fmt.Errorf("image info is empty")} }
 	ctx := context.Background()
 	details, err := v.dockerClient.ImageDetails(ctx, v.image.ID)
 	if err != nil { return ImageDetailsLoadErrorMsg{Err: err} }

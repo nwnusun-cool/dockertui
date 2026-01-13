@@ -57,8 +57,8 @@ func NewStatsView(dockerClient docker.Client) *StatsView {
 		cpuHistory:    make([]float64, 0, 60),
 		memoryHistory: make([]float64, 0, 60),
 		granularity:   Granularity1s,
-		cpuChart:      NewSparkline("CPU 使用率", 60, 8),
-		memoryChart:   NewSparkline("内存使用", 60, 8),
+		cpuChart:      NewSparkline("CPU Usage", 60, 8),
+		memoryChart:   NewSparkline("Memory Usage", 60, 8),
 	}
 }
 
@@ -184,13 +184,13 @@ func (v *StatsView) aggregateData() {
 	var timeRange string
 	switch v.granularity {
 	case Granularity1s:
-		interval, maxPoints, timeRange = 1*time.Second, 60, "1分钟"
+		interval, maxPoints, timeRange = 1*time.Second, 60, "1min"
 	case Granularity5s:
-		interval, maxPoints, timeRange = 5*time.Second, 60, "5分钟"
+		interval, maxPoints, timeRange = 5*time.Second, 60, "5min"
 	case Granularity10s:
-		interval, maxPoints, timeRange = 10*time.Second, 60, "10分钟"
+		interval, maxPoints, timeRange = 10*time.Second, 60, "10min"
 	case Granularity30s:
-		interval, maxPoints, timeRange = 30*time.Second, 60, "30分钟"
+		interval, maxPoints, timeRange = 30*time.Second, 60, "30min"
 	}
 	v.cpuHistory = v.aggregateDataPoints(v.cpuRawData, interval, maxPoints)
 	v.memoryHistory = v.aggregateDataPoints(v.memoryRawData, interval, maxPoints)
@@ -198,13 +198,13 @@ func (v *StatsView) aggregateData() {
 	v.cpuChart.Max = 100
 	v.cpuChart.Unit = "%"
 	v.cpuChart.Color = "82"
-	v.cpuChart.Title = fmt.Sprintf("CPU 使用率 (最近%s)", timeRange)
+	v.cpuChart.Title = fmt.Sprintf("CPU Usage (last %s)", timeRange)
 	if v.currentStats != nil {
 		v.memoryChart.SetData(v.memoryHistory)
 		v.memoryChart.Max = float64(v.currentStats.MemoryLimit) / 1024 / 1024
 		v.memoryChart.Unit = "MB"
 		v.memoryChart.Color = "81"
-		v.memoryChart.Title = fmt.Sprintf("内存使用 (最近%s)", timeRange)
+		v.memoryChart.Title = fmt.Sprintf("Memory Usage (last %s)", timeRange)
 	}
 }
 
@@ -253,7 +253,6 @@ func (v *StatsView) Render() string {
 // renderSummary 渲染顶部摘要
 func (v *StatsView) renderSummary() string {
 	stats := v.currentStats
-	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 2).Width(v.width - 8)
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
@@ -267,8 +266,8 @@ func (v *StatsView) renderSummary() string {
 	memUsed := FormatBytes(stats.MemoryUsage)
 	memLimit := FormatBytes(stats.MemoryLimit)
 	memText := memStyle.Render(fmt.Sprintf("%s / %s (%.1f%%)", memUsed, memLimit, stats.MemoryPercent))
-	line1 := labelStyle.Render("CPU: ") + cpuText + "    " + labelStyle.Render("内存: ") + memText + "    " + labelStyle.Render("进程数: ") + valueStyle.Render(fmt.Sprintf("%d", stats.PIDs))
-	granularityNames := []string{"1秒", "5秒", "10秒", "30秒"}
+	line1 := labelStyle.Render("CPU: ") + cpuText + "    " + labelStyle.Render("Memory: ") + memText + "    " + labelStyle.Render("PIDs: ") + valueStyle.Render(fmt.Sprintf("%d", stats.PIDs))
+	granularityNames := []string{"1s", "5s", "10s", "30s"}
 	var granularityHints []string
 	for i, name := range granularityNames {
 		if TimeGranularity(i) == v.granularity {
@@ -277,25 +276,56 @@ func (v *StatsView) renderSummary() string {
 			granularityHints = append(granularityHints, hintStyle.Render(fmt.Sprintf("[%d] %s", i+1, name)))
 		}
 	}
-	line2 := hintStyle.Render("时间粒度: ") + strings.Join(granularityHints, "  ")
-	return "\n  " + boxStyle.Render(line1 + "\n" + line2)
+	line2 := hintStyle.Render("Granularity: ") + strings.Join(granularityHints, "  ")
+	
+	content := line1 + "\n" + line2
+	return "\n" + v.wrapInBox("Resource Overview", content, v.width-6)
 }
 
 // renderCharts 渲染折线图
 func (v *StatsView) renderCharts() string {
-	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(1, 2)
 	chartWidth := (v.width - 16) / 2
 	if chartWidth < 30 { chartWidth = 30 }
-	v.cpuChart.Width = chartWidth
-	v.memoryChart.Width = chartWidth
-	cpuBox := boxStyle.Width(chartWidth + 4).Render(v.cpuChart.Render())
-	memBox := boxStyle.Width(chartWidth + 4).Render(v.memoryChart.Render())
+	v.cpuChart.Width = chartWidth - 8
+	v.memoryChart.Width = chartWidth - 8
+	
+	// 渲染两个图表
+	cpuContent := v.cpuChart.Render()
+	memContent := v.memoryChart.Render()
+	
+	// 确保两个图表内容高度一致
+	cpuLines := strings.Split(cpuContent, "\n")
+	memLines := strings.Split(memContent, "\n")
+	maxLines := len(cpuLines)
+	if len(memLines) > maxLines {
+		maxLines = len(memLines)
+	}
+	
+	// 补齐行数
+	for len(cpuLines) < maxLines {
+		cpuLines = append(cpuLines, "")
+	}
+	for len(memLines) < maxLines {
+		memLines = append(memLines, "")
+	}
+	
+	cpuContent = strings.Join(cpuLines, "\n")
+	memContent = strings.Join(memLines, "\n")
+	
+	// 使用和镜像/网络模块一样的 wrapInBox 方式
+	cpuBox := v.wrapInBox("CPU Usage", cpuContent, chartWidth)
+	memBox := v.wrapInBox("Memory Usage", memContent, chartWidth)
+	
 	return "  " + lipgloss.JoinHorizontal(lipgloss.Top, cpuBox, "  ", memBox)
+}
+
+// wrapInBox 用边框包裹内容（和镜像/网络模块保持一致）
+func (v *StatsView) wrapInBox(title, content string, width int) string {
+	return WrapInBox(title, content, width)
 }
 
 // renderIOInfo 渲染 I/O 信息
 func (v *StatsView) renderIOInfo() string {
-	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 2).Width(v.width - 8)
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	rxStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 	txStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
@@ -303,13 +333,14 @@ func (v *StatsView) renderIOInfo() string {
 	netTx := txStyle.Render("↑ " + FormatBytesRate(v.networkTxRate))
 	blockR := rxStyle.Render("R " + FormatBytes(v.currentStats.BlockRead))
 	blockW := txStyle.Render("W " + FormatBytes(v.currentStats.BlockWrite))
-	content := labelStyle.Render("网络 I/O: ") + netRx + "  " + netTx + "    " + labelStyle.Render("磁盘 I/O: ") + blockR + "  " + blockW
-	return "  " + boxStyle.Render(content)
+	content := labelStyle.Render("Network I/O: ") + netRx + "  " + netTx + "    " + labelStyle.Render("Disk I/O: ") + blockR + "  " + blockW
+	
+	return v.wrapInBox("I/O Stats", content, v.width-6)
 }
 
 func (v *StatsView) renderLoading() string {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Align(lipgloss.Center).Width(v.width - 8)
-	return "\n" + style.Render("⏳ 正在获取资源数据...")
+	return "\n" + style.Render("⏳ Fetching resource data...")
 }
 
 func (v *StatsView) renderError() string {
@@ -319,12 +350,12 @@ func (v *StatsView) renderError() string {
 
 func (v *StatsView) renderEmpty() string {
 	style := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Align(lipgloss.Center).Width(v.width - 8)
-	return "\n" + style.Render("📊 等待数据...")
+	return "\n" + style.Render("📊 Waiting for data...")
 }
 
 // fetchStats 获取统计数据
 func (v *StatsView) fetchStats() tea.Msg {
-	if v.containerID == "" { return StatsErrorMsg{Err: fmt.Errorf("容器 ID 为空")} }
+	if v.containerID == "" { return StatsErrorMsg{Err: fmt.Errorf("container ID is empty")} }
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	stats, err := v.dockerClient.ContainerStats(ctx, v.containerID)

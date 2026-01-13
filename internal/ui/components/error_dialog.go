@@ -50,7 +50,7 @@ func (d *ErrorDialog) Show(title, message string) {
 
 // ShowError 显示错误（简化方法）
 func (d *ErrorDialog) ShowError(message string) {
-	d.Show("❌ 操作失败", message)
+	d.Show("❌ Operation failed", message)
 }
 
 // Hide 隐藏错误弹窗
@@ -123,7 +123,7 @@ func (d *ErrorDialog) View() string {
 		contentParts = append(contentParts, errorDialogMsgStyle.Render(line))
 	}
 	contentParts = append(contentParts, "")
-	contentParts = append(contentParts, errorDialogHintStyle.Render("[Esc/Enter] 关闭"))
+	contentParts = append(contentParts, errorDialogHintStyle.Render("[Esc/Enter] Close"))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
 	return errorDialogStyle.Width(boxWidth).Render(content)

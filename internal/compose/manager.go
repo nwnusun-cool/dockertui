@@ -25,7 +25,7 @@ func NewManager(dockerCli *sdk.Client) (*Manager, error) {
 	// 创建 CLI 客户端
 	cliClient, err := NewClient()
 	if err != nil {
-		return nil, fmt.Errorf("初始化 compose CLI 失败: %w", err)
+		return nil, fmt.Errorf("failed to initialize compose CLI: %w", err)
 	}
 
 	return &Manager{
@@ -97,13 +97,13 @@ func (m *Manager) StartService(ctx context.Context, projectName, serviceName str
 	}
 
 	if len(containers) == 0 {
-		return fmt.Errorf("服务 %s 没有容器", serviceName)
+		return fmt.Errorf("service %s has no containers", serviceName)
 	}
 
 	for _, c := range containers {
 		if c.State != "running" {
 			if err := m.dockerCli.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
-				return fmt.Errorf("启动容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to start container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -120,7 +120,7 @@ func (m *Manager) StopService(ctx context.Context, projectName, serviceName stri
 	}
 
 	if len(containers) == 0 {
-		return fmt.Errorf("服务 %s 没有容器", serviceName)
+		return fmt.Errorf("service %s has no containers", serviceName)
 	}
 
 	var timeoutPtr *int
@@ -131,7 +131,7 @@ func (m *Manager) StopService(ctx context.Context, projectName, serviceName stri
 	for _, c := range containers {
 		if c.State == "running" {
 			if err := m.dockerCli.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: timeoutPtr}); err != nil {
-				return fmt.Errorf("停止容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to stop container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -148,7 +148,7 @@ func (m *Manager) RestartService(ctx context.Context, projectName, serviceName s
 	}
 
 	if len(containers) == 0 {
-		return fmt.Errorf("服务 %s 没有容器", serviceName)
+		return fmt.Errorf("service %s has no containers", serviceName)
 	}
 
 	var timeoutPtr *int
@@ -158,7 +158,7 @@ func (m *Manager) RestartService(ctx context.Context, projectName, serviceName s
 
 	for _, c := range containers {
 		if err := m.dockerCli.ContainerRestart(ctx, c.ID, container.StopOptions{Timeout: timeoutPtr}); err != nil {
-			return fmt.Errorf("重启容器 %s 失败: %w", c.ID[:12], err)
+			return fmt.Errorf("failed to restart container %s: %w", c.ID[:12], err)
 		}
 	}
 
@@ -176,7 +176,7 @@ func (m *Manager) PauseService(ctx context.Context, projectName, serviceName str
 	for _, c := range containers {
 		if c.State == "running" {
 			if err := m.dockerCli.ContainerPause(ctx, c.ID); err != nil {
-				return fmt.Errorf("暂停容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to pause container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -195,7 +195,7 @@ func (m *Manager) UnpauseService(ctx context.Context, projectName, serviceName s
 	for _, c := range containers {
 		if c.State == "paused" {
 			if err := m.dockerCli.ContainerUnpause(ctx, c.ID); err != nil {
-				return fmt.Errorf("恢复容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to unpause container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -216,7 +216,7 @@ func (m *Manager) StartProject(ctx context.Context, projectName string) error {
 	for _, c := range containers {
 		if c.State != "running" {
 			if err := m.dockerCli.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
-				return fmt.Errorf("启动容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to start container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -240,7 +240,7 @@ func (m *Manager) StopProject(ctx context.Context, projectName string, timeout i
 	for _, c := range containers {
 		if c.State == "running" {
 			if err := m.dockerCli.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: timeoutPtr}); err != nil {
-				return fmt.Errorf("停止容器 %s 失败: %w", c.ID[:12], err)
+				return fmt.Errorf("failed to stop container %s: %w", c.ID[:12], err)
 			}
 		}
 	}
@@ -263,7 +263,7 @@ func (m *Manager) RestartProject(ctx context.Context, projectName string, timeou
 
 	for _, c := range containers {
 		if err := m.dockerCli.ContainerRestart(ctx, c.ID, container.StopOptions{Timeout: timeoutPtr}); err != nil {
-			return fmt.Errorf("重启容器 %s 失败: %w", c.ID[:12], err)
+			return fmt.Errorf("failed to restart container %s: %w", c.ID[:12], err)
 		}
 	}
 
@@ -281,7 +281,7 @@ func (m *Manager) ServiceLogs(ctx context.Context, projectName, serviceName stri
 	}
 
 	if len(containers) == 0 {
-		return nil, fmt.Errorf("服务 %s 没有容器", serviceName)
+		return nil, fmt.Errorf("service %s has no containers", serviceName)
 	}
 
 	// 获取第一个容器的日志

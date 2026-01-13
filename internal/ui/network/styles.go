@@ -1,99 +1,46 @@
 package network
 
-import "github.com/charmbracelet/lipgloss"
-
-// 网络列表视图样式
-var (
-	TitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-
-	DriverStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
-
-	BuiltInStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	CustomStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
-
-	StateBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 2).
-		Width(66)
+import (
+	"docktui/internal/ui/styles"
 )
 
-// 网络详情视图样式
+// 网络模块样式 - 引用全局样式
 var (
-	DetailTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
+	// 标题
+	TitleStyle = styles.TitleStyle
 
-	DetailLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Width(16)
+	// 网络类型
+	DriverStyle  = styles.KeyStyle
+	BuiltInStyle = styles.MutedStyle
+	CustomStyle  = styles.ActiveStyle
 
-	DetailValueStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+	// 状态框
+	StateBoxStyle = styles.StateBoxStyle
 
-	DetailBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1)
+	// 详情视图
+	DetailTitleStyle = styles.TitleStyle
+	DetailLabelStyle = styles.LabelStyle
+	DetailValueStyle = styles.ValueStyle
+	DetailBoxStyle   = styles.BoxStyle
+	DetailHintStyle  = styles.HintStyle
+	DetailKeyStyle   = styles.KeyStyle
 
-	TabActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true).
-		Underline(true)
+	// 标签页
+	TabActiveStyle   = styles.TabActiveStyle
+	TabInactiveStyle = styles.TabInactiveStyle
 
-	TabInactiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+	// 容器状态
+	ContainerRunningStyle = styles.RunningStyle
+	ContainerStoppedStyle = styles.StoppedStyle
 
-	DetailHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	DetailKeyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
-
-	ContainerRunningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
-
-	ContainerStoppedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-)
-
-// 创建网络表单样式
-var (
-	FormTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-
-	FormLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Width(14)
-
-	FormInputStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	FormInputActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-
-	FormHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	FormCheckboxStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
-
-	FormButtonStyle = lipgloss.NewStyle().
-		Padding(0, 2)
-
-	FormButtonActiveStyle = lipgloss.NewStyle().
-		Padding(0, 2).
-		Reverse(true).
-		Bold(true)
-
-	FormErrorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196"))
+	// 表单
+	FormTitleStyle       = styles.FormTitleStyle
+	FormLabelStyle       = styles.FormLabelStyle
+	FormInputStyle       = styles.FormInputStyle
+	FormInputActiveStyle = styles.FormInputActiveStyle
+	FormHintStyle        = styles.FormHintStyle
+	FormCheckboxStyle    = styles.FormCheckboxStyle
+	FormButtonStyle      = styles.ButtonInactiveStyle
+	FormButtonActiveStyle = styles.ButtonActiveStyle
+	FormErrorStyle       = styles.FormErrorStyle
 )

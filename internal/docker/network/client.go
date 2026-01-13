@@ -32,13 +32,13 @@ var builtInNetworks = map[string]bool{
 // List 获取网络列表
 func (c *Client) List(ctx context.Context) ([]Network, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取网络列表
 	networks, err := c.cli.NetworkList(ctx, network.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("获取网络列表失败: %w", err)
+		return nil, fmt.Errorf("failed to get network list: %w", err)
 	}
 
 	result := make([]Network, 0, len(networks))
@@ -84,7 +84,7 @@ func (c *Client) List(ctx context.Context) ([]Network, error) {
 // GetDetails 获取网络详细信息
 func (c *Client) GetDetails(ctx context.Context, networkID string) (*Details, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取网络详情
@@ -92,7 +92,7 @@ func (c *Client) GetDetails(ctx context.Context, networkID string) (*Details, er
 		Verbose: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("获取网络详情失败: %w", err)
+		return nil, fmt.Errorf("failed to get network details: %w", err)
 	}
 
 	// 解析 IPAM 配置
@@ -148,11 +148,11 @@ func (c *Client) GetDetails(ctx context.Context, networkID string) (*Details, er
 // Create 创建网络
 func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error) {
 	if c == nil || c.cli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 
 	if opts.Name == "" {
-		return "", fmt.Errorf("网络名称不能为空")
+		return "", fmt.Errorf("network name cannot be empty")
 	}
 
 	// 默认驱动
@@ -187,7 +187,7 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 		IPAM:       ipamConfig,
 	})
 	if err != nil {
-		return "", fmt.Errorf("创建网络失败: %w", err)
+		return "", fmt.Errorf("failed to create network: %w", err)
 	}
 
 	return resp.ID, nil
@@ -196,12 +196,12 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (string, error)
 // Remove 删除网络
 func (c *Client) Remove(ctx context.Context, networkID string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	err := c.cli.NetworkRemove(ctx, networkID)
 	if err != nil {
-		return fmt.Errorf("删除网络失败: %w", err)
+		return fmt.Errorf("failed to remove network: %w", err)
 	}
 
 	return nil
@@ -211,12 +211,12 @@ func (c *Client) Remove(ctx context.Context, networkID string) error {
 // 返回删除的网络名称列表
 func (c *Client) Prune(ctx context.Context) ([]string, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	report, err := c.cli.NetworksPrune(ctx, filters.Args{})
 	if err != nil {
-		return nil, fmt.Errorf("清理网络失败: %w", err)
+		return nil, fmt.Errorf("failed to prune networks: %w", err)
 	}
 
 	return report.NetworksDeleted, nil
@@ -225,11 +225,11 @@ func (c *Client) Prune(ctx context.Context) ([]string, error) {
 // Connect 将容器连接到网络
 func (c *Client) Connect(ctx context.Context, networkID string, opts ConnectOptions) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	if opts.ContainerID == "" {
-		return fmt.Errorf("容器 ID 不能为空")
+		return fmt.Errorf("container ID cannot be empty")
 	}
 
 	// 构建端点配置
@@ -247,7 +247,7 @@ func (c *Client) Connect(ctx context.Context, networkID string, opts ConnectOpti
 
 	err := c.cli.NetworkConnect(ctx, networkID, opts.ContainerID, endpointConfig)
 	if err != nil {
-		return fmt.Errorf("连接容器到网络失败: %w", err)
+		return fmt.Errorf("failed to connect container to network: %w", err)
 	}
 
 	return nil
@@ -256,16 +256,16 @@ func (c *Client) Connect(ctx context.Context, networkID string, opts ConnectOpti
 // Disconnect 将容器从网络断开
 func (c *Client) Disconnect(ctx context.Context, networkID string, opts DisconnectOptions) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	if opts.ContainerID == "" {
-		return fmt.Errorf("容器 ID 不能为空")
+		return fmt.Errorf("container ID cannot be empty")
 	}
 
 	err := c.cli.NetworkDisconnect(ctx, networkID, opts.ContainerID, opts.Force)
 	if err != nil {
-		return fmt.Errorf("断开容器与网络连接失败: %w", err)
+		return fmt.Errorf("failed to disconnect container from network: %w", err)
 	}
 
 	return nil
@@ -274,7 +274,7 @@ func (c *Client) Disconnect(ctx context.Context, networkID string, opts Disconne
 // InspectRaw 获取网络的原始 JSON 数据
 func (c *Client) InspectRaw(ctx context.Context, networkID string) (string, error) {
 	if c == nil || c.cli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取网络详情
@@ -282,13 +282,13 @@ func (c *Client) InspectRaw(ctx context.Context, networkID string) (string, erro
 		Verbose: true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("获取网络详情失败: %w", err)
+		return "", fmt.Errorf("failed to get network details: %w", err)
 	}
 
 	// 格式化为 JSON
 	jsonData, err := json.MarshalIndent(net, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("JSON 序列化失败: %w", err)
+		return "", fmt.Errorf("JSON serialization failed: %w", err)
 	}
 
 	return string(jsonData), nil

@@ -28,7 +28,7 @@ func NewClient(cli *sdk.Client) *Client {
 // showAll: true 显示所有镜像（包括悬垂镜像），false 仅显示有标签的镜像
 func (c *Client) List(ctx context.Context, showAll bool) ([]Image, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 构建过滤器
@@ -43,13 +43,13 @@ func (c *Client) List(ctx context.Context, showAll bool) ([]Image, error) {
 		Filters: filterArgs,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("获取镜像列表失败: %w", err)
+		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}
 
 	// 获取所有容器，用于判断镜像是否被使用
 	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, fmt.Errorf("获取容器列表失败: %w", err)
+		return nil, fmt.Errorf("failed to get container list: %w", err)
 	}
 
 	// 构建镜像ID到容器ID的映射
@@ -133,13 +133,13 @@ func (c *Client) List(ctx context.Context, showAll bool) ([]Image, error) {
 // GetDetails 获取指定镜像的详细信息
 func (c *Client) GetDetails(ctx context.Context, imageID string) (*Details, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取镜像详细信息
 	inspectResp, _, err := c.cli.ImageInspectWithRaw(ctx, imageID)
 	if err != nil {
-		return nil, fmt.Errorf("获取镜像详情失败: %w", err)
+		return nil, fmt.Errorf("failed to get image details: %w", err)
 	}
 
 	// 仓库名和标签
@@ -174,7 +174,7 @@ func (c *Client) GetDetails(ctx context.Context, imageID string) (*Details, erro
 	// 获取使用此镜像的容器
 	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return nil, fmt.Errorf("获取容器列表失败: %w", err)
+		return nil, fmt.Errorf("failed to get container list: %w", err)
 	}
 
 	containerRefs := make([]ContainerRef, 0)
@@ -284,19 +284,19 @@ func (c *Client) GetDetails(ctx context.Context, imageID string) (*Details, erro
 // InspectRaw 获取镜像的原始 JSON 数据
 func (c *Client) InspectRaw(ctx context.Context, imageID string) (string, error) {
 	if c == nil || c.cli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取镜像详情
 	inspectResp, _, err := c.cli.ImageInspectWithRaw(ctx, imageID)
 	if err != nil {
-		return "", fmt.Errorf("获取镜像详情失败: %w", err)
+		return "", fmt.Errorf("failed to get image details: %w", err)
 	}
 
 	// 格式化为 JSON
 	jsonData, err := json.MarshalIndent(inspectResp, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("JSON 序列化失败: %w", err)
+		return "", fmt.Errorf("JSON serialization failed: %w", err)
 	}
 
 	return string(jsonData), nil
@@ -307,7 +307,7 @@ func (c *Client) InspectRaw(ctx context.Context, imageID string) (string, error)
 // prune: 是否删除未标记的父镜像
 func (c *Client) Remove(ctx context.Context, imageID string, force bool, prune bool) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	_, err := c.cli.ImageRemove(ctx, imageID, dockerimage.RemoveOptions{
@@ -315,7 +315,7 @@ func (c *Client) Remove(ctx context.Context, imageID string, force bool, prune b
 		PruneChildren: prune,
 	})
 	if err != nil {
-		return fmt.Errorf("删除镜像失败: %w", err)
+		return fmt.Errorf("failed to remove image: %w", err)
 	}
 
 	return nil
@@ -325,7 +325,7 @@ func (c *Client) Remove(ctx context.Context, imageID string, force bool, prune b
 // 返回删除的镜像数量和释放的空间（字节）
 func (c *Client) Prune(ctx context.Context) (int, int64, error) {
 	if c == nil || c.cli == nil {
-		return 0, 0, fmt.Errorf("Docker 客户端未初始化")
+		return 0, 0, fmt.Errorf("Docker client not initialized")
 	}
 
 	filterArgs := filters.NewArgs()
@@ -333,7 +333,7 @@ func (c *Client) Prune(ctx context.Context) (int, int64, error) {
 
 	report, err := c.cli.ImagesPrune(ctx, filterArgs)
 	if err != nil {
-		return 0, 0, fmt.Errorf("清理镜像失败: %w", err)
+		return 0, 0, fmt.Errorf("failed to prune images: %w", err)
 	}
 
 	return len(report.ImagesDeleted), int64(report.SpaceReclaimed), nil
@@ -342,14 +342,14 @@ func (c *Client) Prune(ctx context.Context) (int, int64, error) {
 // Tag 给镜像打标签
 func (c *Client) Tag(ctx context.Context, imageID string, repository string, tag string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	ref := repository + ":" + tag
 
 	err := c.cli.ImageTag(ctx, imageID, ref)
 	if err != nil {
-		return fmt.Errorf("打标签失败: %w", err)
+		return fmt.Errorf("failed to tag image: %w", err)
 	}
 
 	return nil
@@ -358,7 +358,7 @@ func (c *Client) Tag(ctx context.Context, imageID string, repository string, tag
 // Untag 删除镜像标签
 func (c *Client) Untag(ctx context.Context, imageRef string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	_, err := c.cli.ImageRemove(ctx, imageRef, dockerimage.RemoveOptions{
@@ -366,7 +366,7 @@ func (c *Client) Untag(ctx context.Context, imageRef string) error {
 		PruneChildren: false,
 	})
 	if err != nil {
-		return fmt.Errorf("删除标签失败: %w", err)
+		return fmt.Errorf("failed to remove tag: %w", err)
 	}
 
 	return nil
@@ -376,12 +376,12 @@ func (c *Client) Untag(ctx context.Context, imageRef string) error {
 // 返回 io.ReadCloser，调用方负责关闭和写入文件
 func (c *Client) Save(ctx context.Context, imageIDs []string) (io.ReadCloser, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	reader, err := c.cli.ImageSave(ctx, imageIDs)
 	if err != nil {
-		return nil, fmt.Errorf("导出镜像失败: %w", err)
+		return nil, fmt.Errorf("failed to export image: %w", err)
 	}
 
 	return reader, nil
@@ -390,12 +390,12 @@ func (c *Client) Save(ctx context.Context, imageIDs []string) (io.ReadCloser, er
 // Load 从 tar 文件加载镜像
 func (c *Client) Load(ctx context.Context, input io.Reader, quiet bool) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	resp, err := c.cli.ImageLoad(ctx, input)
 	if err != nil {
-		return fmt.Errorf("加载镜像失败: %w", err)
+		return fmt.Errorf("failed to load image: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -408,12 +408,12 @@ func (c *Client) Load(ctx context.Context, input io.Reader, quiet bool) error {
 // 返回 io.ReadCloser 用于读取拉取进度，调用方负责关闭
 func (c *Client) Pull(ctx context.Context, imageRef string) (io.ReadCloser, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	reader, err := c.cli.ImagePull(ctx, imageRef, dockerimage.PullOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("拉取镜像失败: %w", err)
+		return nil, fmt.Errorf("failed to pull image: %w", err)
 	}
 
 	return reader, nil
@@ -423,12 +423,12 @@ func (c *Client) Pull(ctx context.Context, imageRef string) (io.ReadCloser, erro
 // 返回 io.ReadCloser 用于读取推送进度，调用方负责关闭
 func (c *Client) Push(ctx context.Context, imageRef string) (io.ReadCloser, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	reader, err := c.cli.ImagePush(ctx, imageRef, dockerimage.PushOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("推送镜像失败: %w", err)
+		return nil, fmt.Errorf("failed to push image: %w", err)
 	}
 
 	return reader, nil

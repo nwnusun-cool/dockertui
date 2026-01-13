@@ -43,13 +43,13 @@ type ExportTask struct {
 // NewExportTask 创建镜像导出任务
 func NewExportTask(client docker.Client, images []ExportImageInfo, dir string, mode ExportMode, compress bool) *ExportTask {
 	taskID := GenerateTaskID()
-	name := fmt.Sprintf("导出 %d 个镜像", len(images))
+	name := fmt.Sprintf("Export %d images", len(images))
 	if len(images) == 1 {
 		imgName := images[0].Repository
 		if imgName == "<none>" {
 			imgName = images[0].ID[:12]
 		}
-		name = fmt.Sprintf("导出 %s", imgName)
+		name = fmt.Sprintf("Export %s", imgName)
 	}
 	
 	return &ExportTask{
@@ -65,13 +65,13 @@ func NewExportTask(client docker.Client, images []ExportImageInfo, dir string, m
 // Run 执行导出任务
 func (t *ExportTask) Run(ctx context.Context) error {
 	t.SetStatus(StatusRunning)
-	t.SetMessage("准备导出...")
+	t.SetMessage("Preparing export...")
 
 	// 创建导出目录
 	if err := os.MkdirAll(t.exportDir, 0755); err != nil {
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
-		t.SetMessage("创建目录失败: " + err.Error())
+		t.SetMessage("Create directory failed: " + err.Error())
 		return err
 	}
 
@@ -106,7 +106,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 	}
 	filepath := t.exportDir + "/" + filename + ext
 
-	t.SetMessage(fmt.Sprintf("正在导出到 %s...", filename+ext))
+	t.SetMessage(fmt.Sprintf("Exporting to %s...", filename+ext))
 	manager.EmitProgress(t.ID(), t.Name(), 10, t.Message())
 
 	// 调用 Docker API 导出
@@ -114,7 +114,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 	if err != nil {
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
-		t.SetMessage("导出失败: " + err.Error())
+		t.SetMessage("Export failed: " + err.Error())
 		return err
 	}
 	defer reader.Close()
@@ -124,7 +124,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 	if err != nil {
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
-		t.SetMessage("创建文件失败: " + err.Error())
+		t.SetMessage("Create file failed: " + err.Error())
 		return err
 	}
 	defer file.Close()
@@ -138,7 +138,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 	}
 
 	t.SetProgress(30)
-	t.SetMessage("正在写入文件...")
+	t.SetMessage("Writing file...")
 	manager.EmitProgress(t.ID(), t.Name(), 30, t.Message())
 
 	// 写入文件
@@ -146,7 +146,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 	if err != nil {
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
-		t.SetMessage("写入失败: " + err.Error())
+		t.SetMessage("Write failed: " + err.Error())
 		return err
 	}
 
@@ -155,7 +155,7 @@ func (t *ExportTask) exportSingleFile(ctx context.Context, manager *Manager) err
 
 	t.SetStatus(StatusCompleted)
 	t.SetProgress(100)
-	t.SetMessage(fmt.Sprintf("导出完成: %s (%s)", filename+ext, formatBytes(written)))
+	t.SetMessage(fmt.Sprintf("Export completed: %s (%s)", filename+ext, formatBytes(written)))
 	manager.EmitProgress(t.ID(), t.Name(), 100, t.Message())
 
 	return nil
@@ -169,7 +169,7 @@ func (t *ExportTask) exportMultipleFiles(ctx context.Context, manager *Manager) 
 		select {
 		case <-ctx.Done():
 			t.SetStatus(StatusCancelled)
-			t.SetMessage("已取消")
+			t.SetMessage("Cancelled")
 			return ctx.Err()
 		default:
 		}
@@ -186,7 +186,7 @@ func (t *ExportTask) exportMultipleFiles(ctx context.Context, manager *Manager) 
 		filepath := t.exportDir + "/" + filename + ext
 
 		t.SetProgress(progress)
-		t.SetMessage(fmt.Sprintf("[%d/%d] 正在导出 %s...", i+1, total, filename))
+		t.SetMessage(fmt.Sprintf("[%d/%d] Exporting %s...", i+1, total, filename))
 		manager.EmitProgress(t.ID(), t.Name(), progress, t.Message())
 
 		// 调用 Docker API 导出
@@ -228,7 +228,7 @@ func (t *ExportTask) exportMultipleFiles(ctx context.Context, manager *Manager) 
 
 	t.SetStatus(StatusCompleted)
 	t.SetProgress(100)
-	t.SetMessage(fmt.Sprintf("导出完成: %d 个文件 (%s)", len(t.exportedFiles), formatBytes(t.totalSize)))
+	t.SetMessage(fmt.Sprintf("Export completed: %d files (%s)", len(t.exportedFiles), formatBytes(t.totalSize)))
 	manager.EmitProgress(t.ID(), t.Name(), 100, t.Message())
 
 	return nil

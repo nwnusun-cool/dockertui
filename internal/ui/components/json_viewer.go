@@ -342,16 +342,16 @@ func (v *JSONViewer) renderStatusBar() string {
 	if v.isSearching {
 		cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
 		status = "  " + jsonSearchPromptStyle.Render("/") + v.searchInput + cursor +
-			"  " + jsonSearchInfoStyle.Render("[Enter=确认 ESC=取消]") + "\n"
+			"  " + jsonSearchInfoStyle.Render("[Enter=Confirm ESC=Cancel]") + "\n"
 	} else if v.searcher.HasMatches() {
 		matchInfo := jsonSearchInfoStyle.Render(
 			"[" + strconv.Itoa(v.searcher.CurrentIndex()) + "/" +
 				strconv.Itoa(v.searcher.MatchCount()) + "]")
 		status = "  " + jsonSearchPromptStyle.Render("/"+v.searcher.Query()) + " " + matchInfo +
-			"  " + jsonViewerHintStyle.Render("n=下一个 N=上一个 ESC=清除") + "\n"
+			"  " + jsonViewerHintStyle.Render("n=Next N=Previous ESC=Clear") + "\n"
 	} else if v.searchInput != "" && !v.searcher.HasMatches() {
-		status = "  " + jsonSearchNoMatchStyle.Render("未找到: "+v.searchInput) +
-			"  " + jsonViewerHintStyle.Render("ESC=清除") + "\n"
+		status = "  " + jsonSearchNoMatchStyle.Render("Not found: "+v.searchInput) +
+			"  " + jsonViewerHintStyle.Render("ESC=Clear") + "\n"
 	} else {
 		scrollInfo := ""
 		if v.maxScrollY > 0 {
@@ -361,7 +361,7 @@ func (v *JSONViewer) renderStatusBar() string {
 			}
 			scrollInfo = jsonViewerHintStyle.Render(strconv.Itoa(percent) + "%")
 		}
-		hints := jsonViewerHintStyle.Render("j/k=上下  g/G=首尾  /=搜索  n/N=跳转  ESC/q=关闭")
+		hints := jsonViewerHintStyle.Render("j/k=Up/Down  g/G=Top/Bottom  /=Search  n/N=Jump  ESC/q=Close")
 		status = "  " + hints + "  " + scrollInfo + "\n"
 	}
 

@@ -1,86 +1,47 @@
 package image
 
-import "github.com/charmbracelet/lipgloss"
-
-// 镜像列表视图样式
-var (
-	StatusBarLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-
-	StatusBarKeyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
-
-	TitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-
-	DanglingStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	ActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
-
-	UnusedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	SuccessMsgStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82")).
-		Bold(true)
-
-	ErrorMsgStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
-		Bold(true)
-
-	SearchPromptStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Bold(true)
-
-	SearchHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-
-	StateBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 2).
-		Width(66)
+import (
+	"docktui/internal/ui/styles"
 )
 
-// 镜像详情视图样式
+// 镜像模块样式 - 引用全局样式
 var (
-	DetailsTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
+	// 状态栏
+	StatusBarLabelStyle = styles.StatusBarLabelStyle
+	StatusBarKeyStyle   = styles.StatusBarKeyStyle
 
-	DetailsLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Width(16)
+	// 标题
+	TitleStyle = styles.TitleStyle
 
-	DetailsValueStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
+	// 镜像状态
+	DanglingStyle = styles.MutedStyle
+	ActiveStyle   = styles.ActiveStyle
+	UnusedStyle   = styles.MutedStyle
 
-	DetailsBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1)
+	// 消息
+	SuccessMsgStyle = styles.SuccessStyle
+	ErrorMsgStyle   = styles.ErrorStyle
 
-	TabActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true).
-		Underline(true)
+	// 搜索
+	SearchPromptStyle = styles.SearchPromptStyle
+	SearchHintStyle   = styles.SearchHintStyle
 
-	TabInactiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+	// 状态框
+	StateBoxStyle = styles.StateBoxStyle
 
-	DetailsHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+	// 详情视图
+	DetailsTitleStyle = styles.TitleStyle
+	DetailsLabelStyle = styles.LabelStyle
+	DetailsValueStyle = styles.ValueStyle
+	DetailsBoxStyle   = styles.BoxStyle
+	DetailsHintStyle  = styles.HintStyle
+	DetailsKeyStyle   = styles.KeyStyle
 
-	DetailsKeyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
+	// 标签页
+	TabActiveStyle   = styles.TabActiveStyle
+	TabInactiveStyle = styles.TabInactiveStyle
 
-	ContainerRunningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82"))
-
-	ContainerStoppedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
+	// 容器状态
+	ContainerRunningStyle = styles.RunningStyle
+	ContainerStoppedStyle = styles.StoppedStyle
 )

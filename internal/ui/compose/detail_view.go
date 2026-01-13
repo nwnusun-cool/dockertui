@@ -61,6 +61,10 @@ type DetailView struct {
 
 	operatingService string
 	operationType    string
+	
+	// 操作日志视图
+	operationLogView *OperationLogView
+	operationStream  *composelib.OperationStream
 }
 
 // NewDetailView 创建 Compose 详情视图
@@ -84,10 +88,11 @@ func NewDetailView(composeClient composelib.Client) *DetailView {
 	t.SetStyles(s)
 
 	return &DetailView{
-		composeClient:   composeClient,
-		serviceTable:    t,
-		currentTab:      tabServices,
-		configFocusLeft: true,
+		composeClient:    composeClient,
+		serviceTable:     t,
+		currentTab:       tabServices,
+		configFocusLeft:  true,
+		operationLogView: NewOperationLogView(),
 	}
 }
 
@@ -154,7 +159,7 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 	case detailServicesMsg:
 		v.loading = false
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("刷新服务失败: %v", msg.err)
+			v.errorMsg = fmt.Sprintf("Failed to refresh services: %v", msg.err)
 		} else {
 			v.services = msg.services
 			v.updateServiceTable()
@@ -165,7 +170,7 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 	case detailConfigFilesMsg:
 		v.loading = false
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("加载配置失败: %v", msg.err)
+			v.errorMsg = fmt.Sprintf("Failed to load config: %v", msg.err)
 		} else {
 			v.envContent = msg.envContent
 			v.envFileName = msg.envFileName
@@ -181,7 +186,7 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 		v.operatingService = ""
 		v.operationType = ""
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("操作失败: %v", msg.err)
+			v.errorMsg = fmt.Sprintf("Operation failed: %v", msg.err)
 			v.successMsg = ""
 		} else {
 			v.successMsg = msg.message
@@ -190,12 +195,43 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case detailOperationLogMsg:
+		// 追加日志行
+		if v.operationLogView != nil {
+			v.operationLogView.AppendLog(msg.line)
+		}
+		// 继续监听更多日志
+		return v.continueListenOperationStream()
+
+	case detailOperationDoneMsg:
+		// 操作完成
+		if v.operationLogView != nil && msg.result != nil {
+			v.operationLogView.SetComplete(msg.result.Success, msg.result.Message)
+		}
+		v.operatingService = ""
+		v.operationType = ""
+		v.operationStream = nil
+		// 刷新服务列表
+		return v.refreshServices
+
 	case detailClearMessageMsg:
 		v.successMsg = ""
 		v.errorMsg = ""
 		return nil
 
 	case tea.KeyMsg:
+		// 如果操作日志视图可见，优先处理
+		if v.operationLogView != nil && v.operationLogView.IsVisible() {
+			if v.operationLogView.Update(msg) {
+				// 如果日志视图关闭了，清理状态
+				if !v.operationLogView.IsVisible() {
+					v.operatingService = ""
+					v.operationType = ""
+				}
+				return nil
+			}
+		}
+
 		if v.operatingService != "" {
 			return nil
 		}
@@ -259,13 +295,28 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 				return v.enterContainerDetail()
 			}
 
+		case "L":
+			// 查看容器日志
+			if v.currentTab == tabServices {
+				return v.viewContainerLogs()
+			}
+
+		case "S":
+			// 进入容器 Shell
+			if v.currentTab == tabServices {
+				return v.execContainerShell()
+			}
+
 		case "h", "left":
 			if v.currentTab == tabConfig {
 				v.configFocusLeft = true
 				return nil
 			}
 		case "l", "right":
-			if v.currentTab == tabConfig {
+			if v.currentTab == tabServices {
+				// 查看容器日志
+				return v.viewContainerLogs()
+			} else if v.currentTab == tabConfig {
 				v.configFocusLeft = false
 				return nil
 			}
@@ -273,24 +324,28 @@ func (v *DetailView) Update(msg tea.Msg) tea.Cmd {
 		case "j", "down":
 			if v.currentTab == tabServices {
 				v.serviceTable.MoveDown(1)
+				return nil
 			} else if v.currentTab == tabConfig {
 				v.scrollCurrentPanel(1)
 			}
 		case "k", "up":
 			if v.currentTab == tabServices {
 				v.serviceTable.MoveUp(1)
+				return nil
 			} else if v.currentTab == tabConfig {
 				v.scrollCurrentPanel(-1)
 			}
 		case "g":
 			if v.currentTab == tabServices {
 				v.serviceTable.GotoTop()
+				return nil
 			} else if v.currentTab == tabConfig {
 				v.scrollCurrentPanelToStart()
 			}
 		case "G":
 			if v.currentTab == tabServices {
 				v.serviceTable.GotoBottom()
+				return nil
 			} else if v.currentTab == tabConfig {
 				v.scrollCurrentPanelToEnd()
 			}
@@ -321,7 +376,14 @@ func (v *DetailView) View() string {
 	content := v.renderTabContent()
 	footer := v.renderFooter()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, tabBar, content, footer)
+	baseView := lipgloss.JoinVertical(lipgloss.Left, header, tabBar, content, footer)
+
+	// 如果操作日志视图可见，叠加显示
+	if v.operationLogView != nil && v.operationLogView.IsVisible() {
+		return v.operationLogView.Overlay(baseView)
+	}
+
+	return baseView
 }
 
 // SetSize 设置视图尺寸
@@ -329,6 +391,9 @@ func (v *DetailView) SetSize(width, height int) {
 	v.width = width
 	v.height = height
 	v.updateTableColumns()
+	if v.operationLogView != nil {
+		v.operationLogView.SetSize(width, height)
+	}
 }
 
 // GetSelectedService 获取选中的服务
@@ -435,7 +500,7 @@ func (v *DetailView) getFooterHeight() int {
 // 渲染方法
 func (v *DetailView) renderHeader() string {
 	if v.project == nil {
-		return HeaderStyle.Width(v.width).Render("🧩 Compose 项目详情")
+		return HeaderStyle.Width(v.width).Render("🧩 Compose Project Details")
 	}
 
 	var statusStyle lipgloss.Style
@@ -443,16 +508,16 @@ func (v *DetailView) renderHeader() string {
 	switch v.project.Status {
 	case composelib.StatusRunning:
 		statusStyle = StatusRunningStyle
-		statusText = "● 运行中"
+		statusText = "● Running"
 	case composelib.StatusPartial:
 		statusStyle = StatusPartialStyle
-		statusText = "◐ 部分"
+		statusText = "◐ Partial"
 	case composelib.StatusStopped:
 		statusStyle = StatusStoppedStyle
-		statusText = "○ 停止"
+		statusText = "○ Stopped"
 	default:
 		statusStyle = StatusErrorStyle
-		statusText = "✗ 错误"
+		statusText = "✗ Error"
 	}
 
 	title := fmt.Sprintf("🧩 %s", v.project.Name)
@@ -464,7 +529,7 @@ func (v *DetailView) renderHeader() string {
 			runningCount++
 		}
 	}
-	stats := fmt.Sprintf("服务: %d/%d", runningCount, len(v.services))
+	stats := fmt.Sprintf("Services: %d/%d", runningCount, len(v.services))
 
 	var headerContent string
 	if v.width >= 60 {
@@ -519,11 +584,11 @@ func (v *DetailView) renderTabContent() string {
 	}
 
 	if v.loading {
-		return msgArea + v.renderCentered("🔄 加载中...", contentHeight)
+		return msgArea + v.renderCentered("🔄 Loading...", contentHeight)
 	}
 
 	if v.operatingService != "" {
-		opMsg := fmt.Sprintf("⏳ 正在执行 %s: %s...", v.operationType, v.operatingService)
+		opMsg := fmt.Sprintf("⏳ Executing %s: %s...", v.operationType, v.operatingService)
 		return msgArea + v.renderCentered(opMsg, contentHeight)
 	}
 
@@ -544,7 +609,7 @@ func (v *DetailView) renderTabContent() string {
 
 func (v *DetailView) renderServicesTab(contentHeight int) string {
 	if len(v.services) == 0 {
-		return v.renderCentered("📭 暂无服务信息", contentHeight)
+		return v.renderCentered("📭 No service info", contentHeight)
 	}
 
 	tableHeight := contentHeight - 1
@@ -575,16 +640,16 @@ func (v *DetailView) renderConfigTabWide(contentHeight int) string {
 
 	leftPanel := v.renderConfigPanel(
 		v.envFileName, v.envContent, v.envScrollOffset,
-		panelWidth, visibleLines, v.configFocusLeft, "无环境变量文件",
+		panelWidth, visibleLines, v.configFocusLeft, "No env file",
 	)
 
 	rightPanel := v.renderConfigPanel(
 		v.ymlFileName, v.ymlContent, v.ymlScrollOffset,
-		panelWidth, visibleLines, !v.configFocusLeft, "无 Compose 文件",
+		panelWidth, visibleLines, !v.configFocusLeft, "No Compose file",
 	)
 
 	combined := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, "  ", rightPanel)
-	hint := ConfigHintStyle.Render(" h/l=切换面板  j/k=滚动  g/G=首尾")
+	hint := ConfigHintStyle.Render(" h/l=Switch panel  j/k=Scroll  g/G=Top/Bottom")
 
 	return "\n" + combined + "\n" + hint
 }
@@ -613,16 +678,16 @@ func (v *DetailView) renderConfigTabNarrow(contentHeight int) string {
 		content = v.envContent
 		fileName = v.envFileName
 		scrollOffset = v.envScrollOffset
-		emptyMsg = "无环境变量文件"
+		emptyMsg = "No env file"
 	} else {
 		content = v.ymlContent
 		fileName = v.ymlFileName
 		scrollOffset = v.ymlScrollOffset
-		emptyMsg = "无 Compose 文件"
+		emptyMsg = "No Compose file"
 	}
 
 	panel := v.renderConfigPanel(fileName, content, scrollOffset, panelWidth, visibleLines, true, emptyMsg)
-	hint := ConfigHintStyle.Render(" h/l=切换文件  j/k=滚动")
+	hint := ConfigHintStyle.Render(" h/l=Switch file  j/k=Scroll")
 
 	return "\n" + fileTabs + "\n" + panel + "\n" + hint
 }
@@ -702,12 +767,12 @@ func (v *DetailView) getDisplayFileName(fileName, defaultName string) string {
 }
 
 func (v *DetailView) renderLogsTab(contentHeight int) string {
-	return v.renderCentered("📜 日志功能开发中...\n\n提示：可使用 docker compose logs 查看", contentHeight)
+	return v.renderCentered("📜 Log feature in development...\n\nTip: Use docker compose logs to view logs", contentHeight)
 }
 
 func (v *DetailView) renderInfoTab(contentHeight int) string {
 	if v.project == nil {
-		return v.renderCentered("暂无项目信息", contentHeight)
+		return v.renderCentered("No project info", contentHeight)
 	}
 
 	boxWidth := v.width - 4
@@ -756,12 +821,12 @@ func (v *DetailView) renderInfoTab(contentHeight int) string {
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		row("项目名称", v.project.Name),
-		row("项目路径", path),
-		row("Compose文件", composeFiles),
-		row("环境变量", envFiles),
-		row("服务数量", fmt.Sprintf("%d", len(v.services))),
-		row("状态", v.project.Status.String()),
+		row("Project Name", v.project.Name),
+		row("Project Path", path),
+		row("Compose File", composeFiles),
+		row("Env File", envFiles),
+		row("Service Count", fmt.Sprintf("%d", len(v.services))),
+		row("Status", v.project.Status.String()),
 	)
 
 	infoBoxStyle := lipgloss.NewStyle().
@@ -789,22 +854,24 @@ func (v *DetailView) renderFooterWide() string {
 
 	if v.currentTab == tabServices {
 		line1Keys := []string{
-			FooterKeyStyle.Render("u") + "=启动",
-			FooterKeyStyle.Render("s") + "=停止",
-			FooterKeyStyle.Render("r") + "=重启",
-			FooterKeyStyle.Render("Enter") + "=容器详情",
+			FooterKeyStyle.Render("u") + "=Start",
+			FooterKeyStyle.Render("s") + "=Stop",
+			FooterKeyStyle.Render("r") + "=Restart",
+			FooterKeyStyle.Render("l") + "=Logs",
+			FooterKeyStyle.Render("S") + "=Shell",
+			FooterKeyStyle.Render("Enter") + "=Details",
 		}
-		line1 = " 服务: " + strings.Join(line1Keys, "  ")
+		line1 = " Service: " + strings.Join(line1Keys, "  ")
 	}
 
 	line2Keys := []string{
-		FooterKeyStyle.Render("U") + "=启动项目",
-		FooterKeyStyle.Render("D") + "=停止项目",
-		FooterKeyStyle.Render("1-4") + "=标签",
-		FooterKeyStyle.Render("R") + "=刷新",
-		FooterKeyStyle.Render("Esc") + "=返回",
+		FooterKeyStyle.Render("U") + "=Start project",
+		FooterKeyStyle.Render("D") + "=Stop project",
+		FooterKeyStyle.Render("1-4") + "=Tabs",
+		FooterKeyStyle.Render("R") + "=Refresh",
+		FooterKeyStyle.Render("Esc") + "=Back",
 	}
-	line2 = " 项目: " + strings.Join(line2Keys, "  ")
+	line2 = " Project: " + strings.Join(line2Keys, "  ")
 
 	footer := FooterStyle.Width(v.width).Render(line2)
 	if line1 != "" {
@@ -818,17 +885,18 @@ func (v *DetailView) renderFooterMedium() string {
 
 	if v.currentTab == tabServices {
 		keys = []string{
-			FooterKeyStyle.Render("u/s/r") + "=服务操作",
-			FooterKeyStyle.Render("U/D") + "=项目",
-			FooterKeyStyle.Render("1-4") + "=标签",
-			FooterKeyStyle.Render("Esc") + "=返回",
+			FooterKeyStyle.Render("u/s/r") + "=Service",
+			FooterKeyStyle.Render("l") + "=Logs",
+			FooterKeyStyle.Render("S") + "=Shell",
+			FooterKeyStyle.Render("U/D") + "=Project",
+			FooterKeyStyle.Render("Esc") + "=Back",
 		}
 	} else {
 		keys = []string{
-			FooterKeyStyle.Render("U/D") + "=项目操作",
-			FooterKeyStyle.Render("1-4") + "=标签",
-			FooterKeyStyle.Render("R") + "=刷新",
-			FooterKeyStyle.Render("Esc") + "=返回",
+			FooterKeyStyle.Render("U/D") + "=Project ops",
+			FooterKeyStyle.Render("1-4") + "=Tabs",
+			FooterKeyStyle.Render("R") + "=Refresh",
+			FooterKeyStyle.Render("Esc") + "=Back",
 		}
 	}
 
@@ -838,7 +906,7 @@ func (v *DetailView) renderFooterMedium() string {
 func (v *DetailView) renderFooterNarrow() string {
 	keys := []string{
 		FooterKeyStyle.Render("1-4") + "=Tab",
-		FooterKeyStyle.Render("Esc") + "=返回",
+		FooterKeyStyle.Render("Esc") + "=Back",
 	}
 	return FooterStyle.Width(v.width).Render(" " + strings.Join(keys, " "))
 }
@@ -861,13 +929,13 @@ func (v *DetailView) updateServiceTable() {
 		var status string
 		switch svc.State {
 		case "running":
-			status = "● 运行中"
+			status = "● Running"
 		case "exited":
-			status = "○ 已停止"
+			status = "○ Stopped"
 		case "partial":
-			status = "◐ 部分"
+			status = "◐ Partial"
 		case "paused":
-			status = "❚❚ 暂停"
+			status = "❚❚ Paused"
 		default:
 			status = "? " + svc.State
 		}
@@ -912,10 +980,10 @@ func (v *DetailView) updateTableColumns() {
 	imageWidth := v.getImageColumnWidth()
 
 	columns := []table.Column{
-		{Title: "服务名称", Width: nameWidth},
-		{Title: "状态", Width: statusWidth},
-		{Title: "副本", Width: replicasWidth},
-		{Title: "镜像", Width: imageWidth},
+		{Title: "Service Name", Width: nameWidth},
+		{Title: "Status", Width: statusWidth},
+		{Title: "Replicas", Width: replicasWidth},
+		{Title: "Image", Width: imageWidth},
 	}
 	v.serviceTable.SetColumns(columns)
 }
@@ -930,7 +998,7 @@ func (v *DetailView) handleTabChange() tea.Cmd {
 // 数据加载方法
 func (v *DetailView) refreshServices() tea.Msg {
 	if v.composeClient == nil || v.project == nil {
-		return detailServicesMsg{err: fmt.Errorf("客户端或项目未初始化")}
+		return detailServicesMsg{err: fmt.Errorf("client or project not initialized")}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -947,7 +1015,7 @@ func (v *DetailView) refreshServices() tea.Msg {
 
 func (v *DetailView) loadConfigFiles() tea.Msg {
 	if v.project == nil {
-		return detailConfigFilesMsg{err: fmt.Errorf("项目未初始化")}
+		return detailConfigFilesMsg{err: fmt.Errorf("project not initialized")}
 	}
 
 	result := detailConfigFilesMsg{}
@@ -1001,7 +1069,7 @@ func (v *DetailView) loadConfigFiles() tea.Msg {
 func (v *DetailView) startServiceOperation(opType string) tea.Cmd {
 	svc := v.GetSelectedService()
 	if svc == nil {
-		v.errorMsg = "请先选择一个服务"
+		v.errorMsg = "Please select a service first"
 		return v.clearMessageAfter(3)
 	}
 
@@ -1010,12 +1078,25 @@ func (v *DetailView) startServiceOperation(opType string) tea.Cmd {
 	v.errorMsg = ""
 	v.successMsg = ""
 
-	return v.executeServiceOperation(svc.Name, opType)
+	// 显示操作日志视图
+	opNames := map[string]string{"start": "Starting", "stop": "Stopping", "restart": "Restarting"}
+	title := opNames[opType]
+	if title == "" {
+		title = opType
+	}
+	title = title + " Service: " + svc.Name
+
+	if v.operationLogView != nil {
+		v.operationLogView.SetSize(v.width, v.height)
+		v.operationLogView.Show(title)
+	}
+
+	return v.executeServiceOperationStream(svc.Name, opType)
 }
 
 func (v *DetailView) startProjectOperation(opType string) tea.Cmd {
 	if v.project == nil {
-		v.errorMsg = "项目未初始化"
+		v.errorMsg = "Project not initialized"
 		return v.clearMessageAfter(3)
 	}
 
@@ -1024,13 +1105,26 @@ func (v *DetailView) startProjectOperation(opType string) tea.Cmd {
 	v.errorMsg = ""
 	v.successMsg = ""
 
-	return v.executeProjectOperation(opType)
+	// 显示操作日志视图
+	opNames := map[string]string{"up": "Starting Project", "down": "Stopping Project"}
+	title := opNames[opType]
+	if title == "" {
+		title = opType + " Project"
+	}
+	title = title + ": " + v.project.Name
+
+	if v.operationLogView != nil {
+		v.operationLogView.SetSize(v.width, v.height)
+		v.operationLogView.Show(title)
+	}
+
+	return v.executeProjectOperationStream(opType)
 }
 
 func (v *DetailView) executeServiceOperation(serviceName, opType string) tea.Cmd {
 	return func() tea.Msg {
 		if v.composeClient == nil {
-			return detailOperationMsg{err: fmt.Errorf("客户端未初始化")}
+			return detailOperationMsg{err: fmt.Errorf("client not initialized")}
 		}
 
 		var result *composelib.OperationResult
@@ -1045,7 +1139,7 @@ func (v *DetailView) executeServiceOperation(serviceName, opType string) tea.Cmd
 		case "restart":
 			result, err = v.composeClient.Restart(v.project, services, 10)
 		default:
-			return detailOperationMsg{err: fmt.Errorf("未知操作: %s", opType)}
+			return detailOperationMsg{err: fmt.Errorf("unknown operation: %s", opType)}
 		}
 
 		if err != nil {
@@ -1055,15 +1149,42 @@ func (v *DetailView) executeServiceOperation(serviceName, opType string) tea.Cmd
 			return detailOperationMsg{err: fmt.Errorf(result.Message)}
 		}
 
-		opNames := map[string]string{"start": "启动", "stop": "停止", "restart": "重启"}
-		return detailOperationMsg{message: fmt.Sprintf("%s 服务 %s 成功", opNames[opType], serviceName)}
+		opNames := map[string]string{"start": "Start", "stop": "Stop", "restart": "Restart"}
+		return detailOperationMsg{message: fmt.Sprintf("%s service %s succeeded", opNames[opType], serviceName)}
 	}
+}
+
+// executeServiceOperationStream 流式执行服务操作
+func (v *DetailView) executeServiceOperationStream(serviceName, opType string) tea.Cmd {
+	wrapper, ok := v.composeClient.(*composelib.ComposeClientWrapper)
+	if !ok {
+		// 回退到非流式方法
+		return v.executeServiceOperation(serviceName, opType)
+	}
+
+	services := []string{serviceName}
+	var stream *composelib.OperationStream
+
+	switch opType {
+	case "start":
+		stream = wrapper.StartStream(v.project, services)
+	case "stop":
+		stream = wrapper.StopStream(v.project, services, 10)
+	case "restart":
+		stream = wrapper.RestartStream(v.project, services, 10)
+	default:
+		v.errorMsg = "Unknown operation: " + opType
+		return nil
+	}
+
+	v.operationStream = stream
+	return v.listenOperationStream()
 }
 
 func (v *DetailView) executeProjectOperation(opType string) tea.Cmd {
 	return func() tea.Msg {
 		if v.composeClient == nil {
-			return detailOperationMsg{err: fmt.Errorf("客户端未初始化")}
+			return detailOperationMsg{err: fmt.Errorf("client not initialized")}
 		}
 
 		var result *composelib.OperationResult
@@ -1075,7 +1196,7 @@ func (v *DetailView) executeProjectOperation(opType string) tea.Cmd {
 		case "down":
 			result, err = v.composeClient.Down(v.project, composelib.DownOptions{})
 		default:
-			return detailOperationMsg{err: fmt.Errorf("未知操作: %s", opType)}
+			return detailOperationMsg{err: fmt.Errorf("unknown operation: %s", opType)}
 		}
 
 		if err != nil {
@@ -1085,21 +1206,116 @@ func (v *DetailView) executeProjectOperation(opType string) tea.Cmd {
 			return detailOperationMsg{err: fmt.Errorf(result.Message)}
 		}
 
-		opNames := map[string]string{"up": "启动", "down": "停止"}
-		return detailOperationMsg{message: fmt.Sprintf("%s 项目成功", opNames[opType])}
+		opNames := map[string]string{"up": "Start", "down": "Stop"}
+		return detailOperationMsg{message: fmt.Sprintf("%s project succeeded", opNames[opType])}
 	}
+}
+
+// executeProjectOperationStream 流式执行项目操作
+func (v *DetailView) executeProjectOperationStream(opType string) tea.Cmd {
+	// 获取 composeClient 的底层类型以调用流式方法
+	wrapper, ok := v.composeClient.(*composelib.ComposeClientWrapper)
+	if !ok {
+		// 回退到非流式方法
+		return v.executeProjectOperation(opType)
+	}
+
+	var stream *composelib.OperationStream
+	switch opType {
+	case "up":
+		stream = wrapper.UpStream(v.project, composelib.UpOptions{Detach: true})
+	case "down":
+		stream = wrapper.DownStream(v.project, composelib.DownOptions{})
+	default:
+		v.errorMsg = "Unknown operation: " + opType
+		return nil
+	}
+
+	v.operationStream = stream
+
+	// 返回一个命令来监听日志
+	return v.listenOperationStream()
+}
+
+// listenOperationStream 监听操作流
+func (v *DetailView) listenOperationStream() tea.Cmd {
+	if v.operationStream == nil {
+		return nil
+	}
+
+	return func() tea.Msg {
+		select {
+		case line, ok := <-v.operationStream.LogChan:
+			if ok {
+				return detailOperationLogMsg{line: line}
+			}
+			// LogChan 关闭，等待完成
+			return nil
+		case result, ok := <-v.operationStream.DoneChan:
+			if ok {
+				return detailOperationDoneMsg{result: result}
+			}
+			return nil
+		}
+	}
+}
+
+// continueListenOperationStream 继续监听操作流
+func (v *DetailView) continueListenOperationStream() tea.Cmd {
+	if v.operationStream == nil {
+		return nil
+	}
+	return v.listenOperationStream()
 }
 
 func (v *DetailView) enterContainerDetail() tea.Cmd {
 	svc := v.GetSelectedService()
 	if svc == nil || len(svc.Containers) == 0 {
-		v.errorMsg = "该服务没有运行中的容器"
+		v.errorMsg = "This service has no running containers"
 		return v.clearMessageAfter(3)
 	}
 
 	containerID := svc.Containers[0]
 	return func() tea.Msg {
 		return GoToContainerDetailMsg{
+			ContainerID:   containerID,
+			ContainerName: svc.Name,
+		}
+	}
+}
+
+func (v *DetailView) viewContainerLogs() tea.Cmd {
+	svc := v.GetSelectedService()
+	if svc == nil || len(svc.Containers) == 0 {
+		v.errorMsg = "This service has no running containers"
+		return v.clearMessageAfter(3)
+	}
+
+	containerID := svc.Containers[0]
+	return func() tea.Msg {
+		return GoToContainerLogsMsg{
+			ContainerID:   containerID,
+			ContainerName: svc.Name,
+		}
+	}
+}
+
+func (v *DetailView) execContainerShell() tea.Cmd {
+	svc := v.GetSelectedService()
+	if svc == nil || len(svc.Containers) == 0 {
+		v.errorMsg = "This service has no running containers"
+		return v.clearMessageAfter(3)
+	}
+
+	// 只有运行中的容器才能执行 shell
+	if svc.State != "running" && svc.Running == 0 {
+		v.errorMsg = "Can only execute shell in running containers"
+		return v.clearMessageAfter(3)
+	}
+
+	containerID := svc.Containers[0]
+	return func() tea.Msg {
+		return ExecContainerShellMsg{
 			ContainerID:   containerID,
 			ContainerName: svc.Name,
 		}

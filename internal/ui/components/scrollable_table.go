@@ -271,7 +271,7 @@ func (t *ScrollableTable) renderScrollIndicator(canLeft, canRight bool) string {
 		}
 	}
 
-	hint := t.styles.ScrollIndicator.Render("← → 水平滚动")
+	hint := t.styles.ScrollIndicator.Render("← → Horizontal scroll")
 	position := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
 		strings.Repeat(" ", 10) + "Scroll: " + string(rune('0'+scrollPercent/10)) + string(rune('0'+scrollPercent%10)) + "%",
 	)

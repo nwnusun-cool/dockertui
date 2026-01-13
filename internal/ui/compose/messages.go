@@ -13,6 +13,18 @@ type GoToContainerDetailMsg struct {
 	ContainerName string
 }
 
+// GoToContainerLogsMsg 跳转到容器日志的消息
+type GoToContainerLogsMsg struct {
+	ContainerID   string
+	ContainerName string
+}
+
+// ExecContainerShellMsg 执行容器 Shell 的消息
+type ExecContainerShellMsg struct {
+	ContainerID   string
+	ContainerName string
+}
+
 // GoBackMsg 请求返回上一级视图
 type GoBackMsg struct{}
 
@@ -50,6 +62,16 @@ type detailConfigFilesMsg struct {
 type detailOperationMsg struct {
 	message string
 	err     error
+}
+
+// detailOperationLogMsg 操作日志消息
+type detailOperationLogMsg struct {
+	line string
+}
+
+// detailOperationDoneMsg 操作完成消息
+type detailOperationDoneMsg struct {
+	result *composelib.OperationResult
 }
 
 type detailClearMessageMsg struct{}

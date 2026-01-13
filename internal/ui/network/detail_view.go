@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"docktui/internal/docker"
+	"docktui/internal/ui/components"
 )
 
 // DetailTab 网络详情标签页类型
@@ -92,7 +93,7 @@ func (v *DetailView) View() string {
 	}
 	s.WriteString("\n  " + DetailTitleStyle.Render(title) + "\n\n")
 	s.WriteString(v.renderTabs() + "\n")
-	if v.loading { s.WriteString("\n  " + DetailHintStyle.Render("⏳ 正在加载网络详情...") + "\n"); return s.String() }
+	if v.loading { s.WriteString("\n  " + DetailHintStyle.Render("⏳ Loading network details...") + "\n"); return s.String() }
 	if v.errorMsg != "" { s.WriteString("\n  " + FormErrorStyle.Render("❌ "+v.errorMsg) + "\n"); return s.String() }
 	s.WriteString(v.renderCurrentTab())
 	s.WriteString("\n" + v.renderHints())
@@ -126,18 +127,18 @@ func (v *DetailView) renderCurrentTab() string {
 }
 
 func (v *DetailView) renderBasicInfo() string {
-	if v.details == nil { return "\n  " + DetailHintStyle.Render("无网络信息") }
+	if v.details == nil { return "\n  " + DetailHintStyle.Render("No network info") }
 	var lines []string
 	lines = append(lines, v.formatLine("NETWORK ID", v.details.ID))
 	lines = append(lines, v.formatLine("NAME", v.details.Name))
 	lines = append(lines, v.formatLine("DRIVER", v.details.Driver))
 	lines = append(lines, v.formatLine("SCOPE", v.details.Scope))
 	lines = append(lines, v.formatLine("CREATED", v.details.Created.Format("2006-01-02 15:04:05")+" ("+formatCreatedTime(v.details.Created)+")"))
-	internalStr := "No"; if v.details.Internal { internalStr = "Yes (不能访问外部网络)" }
+	internalStr := "No"; if v.details.Internal { internalStr = "Yes (cannot access external network)" }
 	lines = append(lines, v.formatLine("INTERNAL", internalStr))
 	ipv6Str := "No"; if v.details.IPv6 { ipv6Str = "Yes" }
 	lines = append(lines, v.formatLine("IPv6", ipv6Str))
-	attachableStr := "No"; if v.details.Attachable { attachableStr = "Yes (可手动连接容器)" }
+	attachableStr := "No"; if v.details.Attachable { attachableStr = "Yes (can manually attach containers)" }
 	lines = append(lines, v.formatLine("ATTACHABLE", attachableStr))
 	ingressStr := "No"; if v.details.Ingress { ingressStr = "Yes" }
 	lines = append(lines, v.formatLine("INGRESS", ingressStr))
@@ -152,7 +153,7 @@ func (v *DetailView) renderBasicInfo() string {
 }
 
 func (v *DetailView) renderIPAMConfig() string {
-	if v.details == nil { return "\n  " + DetailHintStyle.Render("无 IPAM 配置信息") }
+	if v.details == nil { return "\n  " + DetailHintStyle.Render("No IPAM config info") }
 	var lines []string
 	driver := v.details.IPAM.Driver; if driver == "" { driver = "default" }
 	lines = append(lines, v.formatLine("IPAM DRIVER", driver))
@@ -171,7 +172,7 @@ func (v *DetailView) renderIPAMConfig() string {
 			if cfg.IPRange != "" { lines = append(lines, "    "+DetailLabelStyle.Render("IP Range:")+" "+DetailValueStyle.Render(cfg.IPRange)) }
 		}
 	} else {
-		lines = append(lines, "", DetailHintStyle.Render("无 IP 池配置（使用默认配置）"))
+		lines = append(lines, "", DetailHintStyle.Render("No IP pool config (using default config)"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox("IPAM Configuration", strings.Join(lines, "\n"), boxWidth)
@@ -179,7 +180,7 @@ func (v *DetailView) renderIPAMConfig() string {
 
 func (v *DetailView) renderContainers() string {
 	if v.details == nil || len(v.details.Containers) == 0 {
-		return "\n  " + DetailHintStyle.Render("没有容器连接到此网络")
+		return "\n  " + DetailHintStyle.Render("No containers connected to this network")
 	}
 	var lines []string
 	containerCount := len(v.details.Containers)
@@ -201,14 +202,14 @@ func (v *DetailView) renderContainers() string {
 		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, containerCount)
 		if v.scrollOffset > 0 { scrollInfo += "↑ " }
 		if v.scrollOffset < v.maxScroll { scrollInfo += "↓" }
-		lines = append(lines, "", DetailHintStyle.Render(scrollInfo+"  j/k 滚动"))
+		lines = append(lines, "", DetailHintStyle.Render(scrollInfo+"  j/k scroll"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox(fmt.Sprintf("Connected Containers (%d)", containerCount), strings.Join(lines, "\n"), boxWidth)
 }
 
 func (v *DetailView) renderLabels() string {
-	if v.details == nil || len(v.details.Labels) == 0 { return "\n  " + DetailHintStyle.Render("无标签信息") }
+	if v.details == nil || len(v.details.Labels) == 0 { return "\n  " + DetailHintStyle.Render("No labels") }
 	var lines []string
 	var labelPairs []string
 	for k, val := range v.details.Labels { labelPairs = append(labelPairs, k+"="+val) }
@@ -226,7 +227,7 @@ func (v *DetailView) renderLabels() string {
 		scrollInfo := fmt.Sprintf("(%d/%d) ", v.scrollOffset+1, labelCount)
 		if v.scrollOffset > 0 { scrollInfo += "↑ " }
 		if v.scrollOffset < v.maxScroll { scrollInfo += "↓" }
-		lines = append(lines, "", DetailHintStyle.Render(scrollInfo+"  j/k 滚动"))
+		lines = append(lines, "", DetailHintStyle.Render(scrollInfo+"  j/k scroll"))
 	}
 	boxWidth := v.width - 6; if boxWidth < 60 { boxWidth = 60 }
 	return "\n" + v.wrapInBox(fmt.Sprintf("Labels (%d)", labelCount), strings.Join(lines, "\n"), boxWidth)
@@ -234,11 +235,11 @@ func (v *DetailView) renderLabels() string {
 
 func (v *DetailView) renderHints() string {
 	hints := []string{
-		DetailKeyStyle.Render("<Tab/←/→>") + " 切换标签",
-		DetailKeyStyle.Render("<1-4>") + " 快速跳转",
-		DetailKeyStyle.Render("<j/k>") + " 滚动",
-		DetailKeyStyle.Render("<r>") + " 刷新",
-		DetailKeyStyle.Render("<Esc>") + " 返回",
+		DetailKeyStyle.Render("<Tab/←/→>") + " Switch tabs",
+		DetailKeyStyle.Render("<1-4>") + " Quick jump",
+		DetailKeyStyle.Render("<j/k>") + " Scroll",
+		DetailKeyStyle.Render("<r>") + " Refresh",
+		DetailKeyStyle.Render("<Esc>") + " Back",
 	}
 	return "  " + DetailHintStyle.Render(strings.Join(hints, "  │  "))
 }
@@ -248,13 +249,11 @@ func (v *DetailView) formatLine(label, value string) string {
 }
 
 func (v *DetailView) wrapInBox(title, content string, width int) string {
-	boxStyle := DetailBoxStyle.Width(width)
-	titleLine := "  " + DetailTitleStyle.Render("─ "+title+" ") + DetailHintStyle.Render(strings.Repeat("─", width-len(title)-6))
-	return titleLine + "\n" + boxStyle.Render(content)
+	return components.WrapInBox(title, content, width)
 }
 
 func (v *DetailView) loadNetworkDetails() tea.Msg {
-	if v.network == nil { return NetworkDetailLoadErrorMsg{Err: fmt.Errorf("网络信息为空")} }
+	if v.network == nil { return NetworkDetailLoadErrorMsg{Err: fmt.Errorf("network info is empty")} }
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	details, err := v.dockerClient.NetworkDetails(ctx, v.network.ID)

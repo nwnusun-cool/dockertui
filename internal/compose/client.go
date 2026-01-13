@@ -30,6 +30,11 @@ type composeClient struct {
 	mu          sync.RWMutex
 }
 
+// ComposeClientWrapper 包装器，暴露流式方法
+type ComposeClientWrapper struct {
+	*composeClient
+}
+
 // 全局客户端实例
 var (
 	defaultClient *composeClient
@@ -46,7 +51,7 @@ func NewClient() (Client, error) {
 	if initError != nil {
 		return nil, initError
 	}
-	return defaultClient, nil
+	return &ComposeClientWrapper{defaultClient}, nil
 }
 
 // detectAndCreateClient 检测并创建客户端
@@ -69,9 +74,9 @@ func detectAndCreateClient() (*composeClient, error) {
 	
 	return nil, &ComposeError{
 		Type:       ErrorNotFound,
-		Message:    "docker compose 命令未找到",
-		Details:    "请确保已安装 Docker Desktop 或 docker-compose",
-		Suggestion: "安装 Docker Desktop: https://www.docker.com/products/docker-desktop",
+		Message:    "docker compose command not found",
+		Details:    "Please ensure Docker Desktop or docker-compose is installed",
+		Suggestion: "Install Docker Desktop: https://www.docker.com/products/docker-desktop",
 	}
 }
 
@@ -183,7 +188,7 @@ func (c *composeClient) runCommand(project *Project, args ...string) (*Operation
 	if cmd == nil {
 		return nil, &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	
@@ -217,7 +222,7 @@ func (c *composeClient) runCommand(project *Project, args ...string) (*Operation
 	
 	result.Success = true
 	result.ExitCode = 0
-	result.Message = "操作成功"
+	result.Message = "Operation successful"
 	return result, nil
 }
 
@@ -230,7 +235,7 @@ func (c *composeClient) parseErrorMessage(stderr string) string {
 			return line
 		}
 	}
-	return "操作失败"
+	return "Operation failed"
 }
 
 // wrapError 包装错误
@@ -247,27 +252,27 @@ func (c *composeClient) wrapError(err error, stderr string) error {
 	switch {
 	case strings.Contains(stderrLower, "yaml") || strings.Contains(stderrLower, "parse"):
 		composeErr.Type = ErrorConfig
-		composeErr.Suggestion = "请检查 compose 文件语法"
+		composeErr.Suggestion = "Please check compose file syntax"
 		
 	case strings.Contains(stderrLower, "port") && strings.Contains(stderrLower, "already"):
 		composeErr.Type = ErrorNetwork
-		composeErr.Suggestion = "端口已被占用，请检查端口冲突"
+		composeErr.Suggestion = "Port already in use, please check for port conflicts"
 		
 	case strings.Contains(stderrLower, "network"):
 		composeErr.Type = ErrorNetwork
-		composeErr.Suggestion = "网络配置错误，请检查网络设置"
+		composeErr.Suggestion = "Network configuration error, please check network settings"
 		
 	case strings.Contains(stderrLower, "image") || strings.Contains(stderrLower, "pull"):
 		composeErr.Type = ErrorImage
-		composeErr.Suggestion = "镜像相关错误，请检查镜像名称或网络连接"
+		composeErr.Suggestion = "Image error, please check image name or network connection"
 		
 	case strings.Contains(stderrLower, "permission") || strings.Contains(stderrLower, "denied"):
 		composeErr.Type = ErrorPermission
-		composeErr.Suggestion = "权限不足，请检查文件权限或以管理员身份运行"
+		composeErr.Suggestion = "Permission denied, please check file permissions or run as administrator"
 		
 	case strings.Contains(stderrLower, "not found") || strings.Contains(stderrLower, "no such"):
 		composeErr.Type = ErrorNotFound
-		composeErr.Suggestion = "文件或资源未找到，请检查路径"
+		composeErr.Suggestion = "File or resource not found, please check path"
 	}
 	
 	return composeErr
@@ -372,7 +377,7 @@ func (c *composeClient) PS(project *Project) ([]Service, error) {
 	if cmd == nil {
 		return nil, &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	
@@ -397,7 +402,7 @@ func (c *composeClient) psLegacy(project *Project) ([]Service, error) {
 	if cmd == nil {
 		return nil, &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	
@@ -603,7 +608,7 @@ func (c *composeClient) Logs(project *Project, opts LogOptions) (io.ReadCloser, 
 	if cmd == nil {
 		return nil, &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	
@@ -647,6 +652,242 @@ func (r *logReader) Close() error {
 	return r.cmd.Wait()
 }
 
+// OperationStream 操作流式输出
+type OperationStream struct {
+	LogChan    <-chan string
+	DoneChan   <-chan *OperationResult
+	Cancel     func()
+}
+
+// RunCommandStream 流式执行命令
+func (c *composeClient) RunCommandStream(project *Project, args ...string) *OperationStream {
+	logChan := make(chan string, 100)
+	doneChan := make(chan *OperationResult, 1)
+	
+	cmd := c.buildCommand(project, args...)
+	if cmd == nil {
+		close(logChan)
+		doneChan <- &OperationResult{
+			Success: false,
+			Message: "Failed to build command",
+		}
+		close(doneChan)
+		return &OperationStream{
+			LogChan:  logChan,
+			DoneChan: doneChan,
+			Cancel:   func() {},
+		}
+	}
+	
+	// 设置工作目录
+	if project != nil && project.Path != "" {
+		cmd.Dir = project.Path
+	}
+	
+	// 获取 stdout 和 stderr 管道
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		close(logChan)
+		doneChan <- &OperationResult{
+			Success: false,
+			Message: "Failed to create stdout pipe: " + err.Error(),
+		}
+		close(doneChan)
+		return &OperationStream{
+			LogChan:  logChan,
+			DoneChan: doneChan,
+			Cancel:   func() {},
+		}
+	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		close(logChan)
+		doneChan <- &OperationResult{
+			Success: false,
+			Message: "Failed to create stderr pipe: " + err.Error(),
+		}
+		close(doneChan)
+		return &OperationStream{
+			LogChan:  logChan,
+			DoneChan: doneChan,
+			Cancel:   func() {},
+		}
+	}
+	
+	start := time.Now()
+	
+	// 启动命令
+	if err := cmd.Start(); err != nil {
+		close(logChan)
+		doneChan <- &OperationResult{
+			Success: false,
+			Message: "Failed to start command: " + err.Error(),
+		}
+		close(doneChan)
+		return &OperationStream{
+			LogChan:  logChan,
+			DoneChan: doneChan,
+			Cancel:   func() {},
+		}
+	}
+	
+	// 取消函数
+	cancelled := false
+	cancel := func() {
+		cancelled = true
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	}
+	
+	// 读取输出的 goroutine
+	go func() {
+		defer close(logChan)
+		defer close(doneChan)
+		
+		var wg sync.WaitGroup
+		wg.Add(2)
+		
+		// 读取 stdout
+		go func() {
+			defer wg.Done()
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				select {
+				case logChan <- scanner.Text():
+				default:
+					// channel 满了，丢弃
+				}
+			}
+		}()
+		
+		// 读取 stderr
+		go func() {
+			defer wg.Done()
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				select {
+				case logChan <- scanner.Text():
+				default:
+					// channel 满了，丢弃
+				}
+			}
+		}()
+		
+		// 等待读取完成
+		wg.Wait()
+		
+		// 等待命令完成
+		err := cmd.Wait()
+		
+		result := &OperationResult{
+			Duration: time.Since(start),
+		}
+		
+		if cancelled {
+			result.Success = false
+			result.Message = "Operation cancelled"
+			result.ExitCode = -1
+		} else if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				result.ExitCode = exitErr.ExitCode()
+			} else {
+				result.ExitCode = -1
+			}
+			result.Success = false
+			result.Message = "Operation failed"
+		} else {
+			result.Success = true
+			result.ExitCode = 0
+			result.Message = "Operation completed"
+		}
+		
+		doneChan <- result
+	}()
+	
+	return &OperationStream{
+		LogChan:  logChan,
+		DoneChan: doneChan,
+		Cancel:   cancel,
+	}
+}
+
+// UpStream 流式启动项目
+func (c *composeClient) UpStream(project *Project, opts UpOptions) *OperationStream {
+	args := []string{"up"}
+	
+	if opts.Detach {
+		args = append(args, "-d")
+	}
+	if opts.Build {
+		args = append(args, "--build")
+	}
+	if opts.ForceRecreate {
+		args = append(args, "--force-recreate")
+	}
+	if opts.NoDeps {
+		args = append(args, "--no-deps")
+	}
+	if opts.Pull != "" {
+		args = append(args, "--pull", opts.Pull)
+	}
+	if opts.Timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(opts.Timeout))
+	}
+	
+	args = append(args, opts.Services...)
+	
+	return c.RunCommandStream(project, args...)
+}
+
+// DownStream 流式停止项目
+func (c *composeClient) DownStream(project *Project, opts DownOptions) *OperationStream {
+	args := []string{"down"}
+	
+	if opts.RemoveVolumes {
+		args = append(args, "-v")
+	}
+	if opts.RemoveOrphans {
+		args = append(args, "--remove-orphans")
+	}
+	if opts.RemoveImages != "" {
+		args = append(args, "--rmi", opts.RemoveImages)
+	}
+	if opts.Timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(opts.Timeout))
+	}
+	
+	return c.RunCommandStream(project, args...)
+}
+
+// RestartStream 流式重启服务
+func (c *composeClient) RestartStream(project *Project, services []string, timeout int) *OperationStream {
+	args := []string{"restart"}
+	if timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(timeout))
+	}
+	args = append(args, services...)
+	return c.RunCommandStream(project, args...)
+}
+
+// StopStream 流式停止服务
+func (c *composeClient) StopStream(project *Project, services []string, timeout int) *OperationStream {
+	args := []string{"stop"}
+	if timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(timeout))
+	}
+	args = append(args, services...)
+	return c.RunCommandStream(project, args...)
+}
+
+// StartStream 流式启动服务
+func (c *composeClient) StartStream(project *Project, services []string) *OperationStream {
+	args := []string{"start"}
+	args = append(args, services...)
+	return c.RunCommandStream(project, args...)
+}
+
 // Config 获取合并后的配置
 func (c *composeClient) Config(project *Project) (string, error) {
 	args := []string{"config"}
@@ -655,7 +896,7 @@ func (c *composeClient) Config(project *Project) (string, error) {
 	if cmd == nil {
 		return "", &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	
@@ -730,7 +971,7 @@ func (c *composeClient) ReadLogs(project *Project, opts LogOptions) (string, err
 	if cmd == nil {
 		return "", &ComposeError{
 			Type:    ErrorUnknown,
-			Message: "无法构建命令",
+			Message: "failed to build command",
 		}
 	}
 	

@@ -101,56 +101,56 @@ func (v *HelpView) View() string {
 	// 定义帮助章节
 	sections := []helpSection{
 		{
-			title: "全局快捷键",
+			title: "Global Shortcuts",
 			items: []helpItem{
-				{"q / Ctrl+C", "退出程序"},
-				{"?", "显示/隐藏帮助"},
-				{"Esc", "返回上一级"},
-				{"c", "直达容器列表"},
-				{"i", "直达镜像列表"},
-				{"n", "直达网络管理 (开发中)"},
-				{"v", "直达卷管理 (开发中)"},
-				{"o", "直达 Compose"},
+				{"q / Ctrl+C", "Quit"},
+				{"?", "Show/Hide Help"},
+				{"Esc", "Go Back"},
+				{"c", "Go to Containers"},
+				{"i", "Go to Images"},
+				{"n", "Go to Networks (WIP)"},
+				{"v", "Go to Volumes (WIP)"},
+				{"o", "Go to Compose"},
 			},
 		},
 		{
-			title: "首页导航",
+			title: "Home Navigation",
 			items: []helpItem{
-				{"↑/↓", "切换运行时/资源区域"},
-				{"←/→", "选择运行时/资源"},
-				{"1-5", "快速选择资源"},
-				{"Enter", "进入选中的资源"},
-				{"r", "刷新状态"},
+				{"↑/↓", "Switch Runtime/Resource"},
+				{"←/→", "Select Runtime/Resource"},
+				{"1-5", "Quick Select Resource"},
+				{"Enter", "Enter Selected"},
+				{"r", "Refresh"},
 			},
 		},
 		{
-			title: "列表导航",
+			title: "List Navigation",
 			items: []helpItem{
-				{"j / ↓", "向下移动"},
-				{"k / ↑", "向上移动"},
-				{"g / Home", "跳到首行"},
-				{"G / End", "跳到末尾"},
-				{"/", "搜索"},
+				{"j / ↓", "Move Down"},
+				{"k / ↑", "Move Up"},
+				{"g / Home", "Go to Top"},
+				{"G / End", "Go to Bottom"},
+				{"/", "Search"},
 			},
 		},
 		{
-			title: "容器操作",
+			title: "Container Operations",
 			items: []helpItem{
-				{"Enter", "查看容器详情"},
-				{"l", "查看容器日志"},
-				{"s", "选择 Shell 并进入"},
-				{"t", "启动容器"},
-				{"p", "停止容器"},
-				{"R", "重启容器"},
+				{"Enter", "View Details"},
+				{"l", "View Logs"},
+				{"s", "Select Shell"},
+				{"t", "Start Container"},
+				{"p", "Stop Container"},
+				{"R", "Restart Container"},
 			},
 		},
 		{
-			title: "日志操作",
+			title: "Log Operations",
 			items: []helpItem{
-				{"f", "切换 Follow 模式"},
-				{"w", "切换自动换行"},
-				{"j/k", "上下滚动"},
-				{"g/G", "跳到首尾"},
+				{"f", "Toggle Follow Mode"},
+				{"w", "Toggle Word Wrap"},
+				{"j/k", "Scroll Up/Down"},
+				{"g/G", "Go to Top/Bottom"},
 			},
 		},
 	}
@@ -190,14 +190,14 @@ func (v *HelpView) View() string {
 	helpDetail := lipgloss.NewStyle().
 		MarginLeft(2).
 		MarginTop(1).
-		Render("📋 快捷键详情:\n\n  " + v.help.View(v.keys))
+		Render("📋 Shortcut Details:\n\n  " + v.help.View(v.keys))
 	
 	// 渲染页脚
 	footer := helpFooterStyle.Render(
-		"💡 提示：快捷键风格遵循 vim 习惯，降低学习成本\n" +
-		"📦 项目地址：github.com/yourusername/docktui\n" +
-		"📖 版本：v0.1.0\n\n" +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true).Render("按 ESC 或 b 返回"),
+		"💡 Tip: Shortcuts follow vim conventions\n" +
+		"📦 Repository: github.com/yourusername/docktui\n" +
+		"📖 Version: v0.1.0\n\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true).Render("Press ESC or b to go back"),
 	)
 	
 	// 组合所有部分

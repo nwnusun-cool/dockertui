@@ -35,73 +35,73 @@ func DefaultKeyMap() KeyMap {
 		// 全局快捷键
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
-			key.WithHelp("q", "退出程序"),
+			key.WithHelp("q", "Quit"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
-			key.WithHelp("?", "显示帮助"),
+			key.WithHelp("?", "Show Help"),
 		),
 		Back: key.NewBinding(
 			key.WithKeys("esc", "b"),
-			key.WithHelp("esc/b", "返回上级"),
+			key.WithHelp("esc/b", "Go Back"),
 		),
 		
 		// 导航快捷键（vim 风格）
 		Up: key.NewBinding(
 			key.WithKeys("k", "up"),
-			key.WithHelp("k/↑", "向上移动"),
+			key.WithHelp("k/↑", "Move Up"),
 		),
 		Down: key.NewBinding(
 			key.WithKeys("j", "down"),
-			key.WithHelp("j/↓", "向下移动"),
+			key.WithHelp("j/↓", "Move Down"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("ctrl+u", "pgup"),
-			key.WithHelp("ctrl+u", "向上翻页"),
+			key.WithHelp("ctrl+u", "Page Up"),
 		),
 		PageDown: key.NewBinding(
 			key.WithKeys("ctrl+d", "pgdown"),
-			key.WithHelp("ctrl+d", "向下翻页"),
+			key.WithHelp("ctrl+d", "Page Down"),
 		),
 		Home: key.NewBinding(
 			key.WithKeys("g", "home"),
-			key.WithHelp("g", "跳到首行"),
+			key.WithHelp("g", "Go to Top"),
 		),
 		End: key.NewBinding(
 			key.WithKeys("G", "end"),
-			key.WithHelp("G", "跳到末尾"),
+			key.WithHelp("G", "Go to Bottom"),
 		),
 		
 		// 容器列表快捷键
 		Enter: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "查看详情"),
+			key.WithHelp("enter", "View Details"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "刷新列表"),
+			key.WithHelp("r", "Refresh"),
 		),
 		ViewLogs: key.NewBinding(
 			key.WithKeys("l"),
-			key.WithHelp("l", "查看日志"),
+			key.WithHelp("l", "View Logs"),
 		),
 		ExecShell: key.NewBinding(
 			key.WithKeys("s"),
-			key.WithHelp("s", "进入 Shell"),
+			key.WithHelp("s", "Enter Shell"),
 		),
 		Containers: key.NewBinding(
 			key.WithKeys("c"),
-			key.WithHelp("c", "容器列表"),
+			key.WithHelp("c", "Containers"),
 		),
 		
 		// 日志视图快捷键
 		ToggleFollow: key.NewBinding(
 			key.WithKeys("f"),
-			key.WithHelp("f", "切换 Follow 模式"),
+			key.WithHelp("f", "Toggle Follow"),
 		),
 		ToggleWrap: key.NewBinding(
 			key.WithKeys("w"),
-			key.WithHelp("w", "切换自动换行"),
+			key.WithHelp("w", "Toggle Wrap"),
 		),
 	}
 }

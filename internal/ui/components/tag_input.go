@@ -215,20 +215,20 @@ func (v *TagInputView) View() string {
 		return ""
 	}
 
-	title := tagInputTitleStyle.Render("🏷️  给镜像打标签")
+	title := tagInputTitleStyle.Render("🏷️  Tag Image")
 
-	sourceInfo := tagInputLabelStyle.Render("源镜像:") + " " +
+	sourceInfo := tagInputLabelStyle.Render("Source:") + " " +
 		tagInputSourceStyle.Render(v.sourceImage) +
 		tagInputHintStyle.Render(" ("+v.SourceImageID[:12]+")")
 
-	repoLabel := tagInputLabelStyle.Render("仓库名:")
+	repoLabel := tagInputLabelStyle.Render("Repository:")
 	repoInputStyle := lipgloss.NewStyle()
 	if v.focusIndex == 0 {
 		repoInputStyle = repoInputStyle.Foreground(lipgloss.Color("81"))
 	}
 	repoLine := repoLabel + " " + repoInputStyle.Render(v.repoInput.View())
 
-	tagLabel := tagInputLabelStyle.Render("标  签:")
+	tagLabel := tagInputLabelStyle.Render("Tag:      ")
 	tagInputStyle := lipgloss.NewStyle()
 	if v.focusIndex == 1 {
 		tagInputStyle = tagInputStyle.Foreground(lipgloss.Color("81"))
@@ -238,7 +238,7 @@ func (v *TagInputView) View() string {
 	repo, tag := v.GetValues()
 	previewText := ""
 	if repo != "" {
-		previewText = tagInputHintStyle.Render("预览: ") +
+		previewText = tagInputHintStyle.Render("Preview: ") +
 			tagInputSourceStyle.Render(repo+":"+tag)
 	}
 
@@ -257,11 +257,11 @@ func (v *TagInputView) View() string {
 		okBtnStyle = okBtnStyle.Foreground(lipgloss.Color("245"))
 	}
 
-	cancelBtn := cancelBtnStyle.Render("< 取消 >")
-	okBtn := okBtnStyle.Render("< 确认 >")
+	cancelBtn := cancelBtnStyle.Render("< Cancel >")
+	okBtn := okBtnStyle.Render("< Confirm >")
 	buttons := cancelBtn + "    " + okBtn
 
-	hints := tagInputHintStyle.Render("[Tab/↑↓=切换] [Enter=确认] [Esc=取消]")
+	hints := tagInputHintStyle.Render("[Tab/↑↓=Switch] [Enter=Confirm] [Esc=Cancel]")
 
 	var contentParts []string
 	contentParts = append(contentParts, title, "", sourceInfo, "", repoLine, "", tagLine)

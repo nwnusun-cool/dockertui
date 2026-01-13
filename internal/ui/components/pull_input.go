@@ -137,8 +137,8 @@ func (v *PullInputView) View() string {
 		return ""
 	}
 
-	title := pullInputTitleStyle.Render("📥 拉取镜像")
-	label := pullInputLabelStyle.Render("镜像名称: ")
+	title := pullInputTitleStyle.Render("📥 Pull Image")
+	label := pullInputLabelStyle.Render("Image name: ")
 	inputLine := label + v.input.View()
 
 	cancelBtnStyle := lipgloss.NewStyle().Padding(0, 2)
@@ -152,11 +152,11 @@ func (v *PullInputView) View() string {
 		okBtnStyle = okBtnStyle.Reverse(true).Bold(true)
 	}
 
-	cancelBtn := cancelBtnStyle.Render("< 取消 >")
-	okBtn := okBtnStyle.Render("< 确认 >")
+	cancelBtn := cancelBtnStyle.Render("< Cancel >")
+	okBtn := okBtnStyle.Render("< Confirm >")
 	buttons := cancelBtn + "    " + okBtn
 
-	hints := pullInputHintStyle.Render("[↑/↓/Tab=切换按钮] [Enter=确认] [Esc=取消]")
+	hints := pullInputHintStyle.Render("[↑/↓/Tab=Switch] [Enter=Confirm] [Esc=Cancel]")
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		title, "", inputLine, "", buttons, "", hints,

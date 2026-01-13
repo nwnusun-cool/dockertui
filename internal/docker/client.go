@@ -165,6 +165,22 @@ type ContainerEvent struct {
 	Timestamp   time.Time // 事件时间
 }
 
+// ProcessInfo 表示容器内进程信息
+type ProcessInfo struct {
+	PID     string // 宿主机进程 ID
+	PPID    string // 父进程 ID
+	User    string // 用户
+	CPU     string // CPU 使用率
+	Memory  string // 内存使用
+	VSZ     string // 虚拟内存大小
+	RSS     string // 常驻内存大小
+	TTY     string // 终端
+	Stat    string // 进程状态
+	Start   string // 启动时间
+	Time    string // 运行时间
+	Command string // 命令
+}
+
 // Client 抽象了 docktui 需要的 Docker 能力
 // 这是一个接口，方便后续扩展（如远程 Docker、mock 测试等）
 type Client interface {
@@ -183,6 +199,10 @@ type Client interface {
 
 	// ContainerStats 获取容器资源使用统计
 	ContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)
+
+	// ContainerTop 获取容器内进程列表（类似 docker top）
+	// 只有运行中的容器才能获取进程列表
+	ContainerTop(ctx context.Context, containerID string) ([]ProcessInfo, error)
 
 	// ContainerLogs 获取容器日志
 	// 返回一个 io.ReadCloser，调用方负责关闭
@@ -328,7 +348,7 @@ func NewLocalClientFromEnv() (*LocalClient, error) {
 		sdk.WithAPIVersionNegotiation(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("创建 Docker 客户端失败: %w", err)
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
 	}
 	return &LocalClient{
 		cli:        cli,
@@ -340,7 +360,7 @@ func NewLocalClientFromEnv() (*LocalClient, error) {
 // Ping 用于验证 Docker 守护进程是否可用。
 func (c *LocalClient) Ping(ctx context.Context) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	_, err := c.cli.Ping(ctx)
 	return err
@@ -349,12 +369,12 @@ func (c *LocalClient) Ping(ctx context.Context) error {
 // ListContainers 获取容器列表
 func (c *LocalClient) ListContainers(ctx context.Context, showAll bool) ([]Container, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	containers, err := c.cli.ContainerList(ctx, container.ListOptions{All: showAll})
 	if err != nil {
-		return nil, fmt.Errorf("获取容器列表失败: %w", err)
+		return nil, fmt.Errorf("failed to get container list: %w", err)
 	}
 
 	result := make([]Container, 0, len(containers))
@@ -428,13 +448,13 @@ func formatPortsFull(ports []container.Port) string {
 // ContainerDetails 获取指定容器的详细信息
 func (c *LocalClient) ContainerDetails(ctx context.Context, containerID string) (*ContainerDetails, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取容器详细信息
 	inspectResp, err := c.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return nil, fmt.Errorf("获取容器详情失败: %w", err)
+		return nil, fmt.Errorf("failed to get container details: %w", err)
 	}
 
 	// 提取容器信息（直接使用 InspectResponse）
@@ -545,19 +565,19 @@ func (c *LocalClient) ContainerDetails(ctx context.Context, containerID string) 
 // InspectContainerRaw 获取容器的原始 JSON 数据
 func (c *LocalClient) InspectContainerRaw(ctx context.Context, containerID string) (string, error) {
 	if c == nil || c.cli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 
 	// 调用 Docker SDK 获取容器详细信息
 	inspectResp, err := c.cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return "", fmt.Errorf("获取容器详情失败: %w", err)
+		return "", fmt.Errorf("failed to get container details: %w", err)
 	}
 
 	// 格式化为 JSON
 	jsonData, err := json.MarshalIndent(inspectResp, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("JSON 序列化失败: %w", err)
+		return "", fmt.Errorf("JSON serialization failed: %w", err)
 	}
 
 	return string(jsonData), nil
@@ -566,7 +586,7 @@ func (c *LocalClient) InspectContainerRaw(ctx context.Context, containerID strin
 // ContainerLogs 获取容器日志
 func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opts LogOptions) (io.ReadCloser, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 构建 Docker SDK 日志选项
@@ -598,7 +618,7 @@ func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opt
 	// 调用 Docker SDK 获取日志流
 	logReader, err := c.cli.ContainerLogs(ctx, containerID, logOpts)
 	if err != nil {
-		return nil, fmt.Errorf("获取容器日志失败: %w", err)
+		return nil, fmt.Errorf("failed to get container logs: %w", err)
 	}
 
 	return logReader, nil
@@ -615,7 +635,7 @@ func (c *LocalClient) ContainerLogs(ctx context.Context, containerID string, opt
 // ListImages 获取镜像列表
 func (c *LocalClient) ListImages(ctx context.Context, showAll bool) ([]Image, error) {
 	if c == nil || c.imageCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.List(ctx, showAll)
 }
@@ -623,7 +643,7 @@ func (c *LocalClient) ListImages(ctx context.Context, showAll bool) ([]Image, er
 // ImageDetails 获取指定镜像的详细信息
 func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageDetails, error) {
 	if c == nil || c.imageCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.GetDetails(ctx, imageID)
 }
@@ -631,7 +651,7 @@ func (c *LocalClient) ImageDetails(ctx context.Context, imageID string) (*ImageD
 // InspectImageRaw 获取镜像的原始 JSON 数据
 func (c *LocalClient) InspectImageRaw(ctx context.Context, imageID string) (string, error) {
 	if c == nil || c.imageCli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.InspectRaw(ctx, imageID)
 }
@@ -639,7 +659,7 @@ func (c *LocalClient) InspectImageRaw(ctx context.Context, imageID string) (stri
 // RemoveImage 删除镜像
 func (c *LocalClient) RemoveImage(ctx context.Context, imageID string, force bool, prune bool) error {
 	if c == nil || c.imageCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Remove(ctx, imageID, force, prune)
 }
@@ -647,7 +667,7 @@ func (c *LocalClient) RemoveImage(ctx context.Context, imageID string, force boo
 // PruneImages 清理悬垂镜像
 func (c *LocalClient) PruneImages(ctx context.Context) (int, int64, error) {
 	if c == nil || c.imageCli == nil {
-		return 0, 0, fmt.Errorf("Docker 客户端未初始化")
+		return 0, 0, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Prune(ctx)
 }
@@ -655,7 +675,7 @@ func (c *LocalClient) PruneImages(ctx context.Context) (int, int64, error) {
 // TagImage 给镜像打标签
 func (c *LocalClient) TagImage(ctx context.Context, imageID string, repository string, tag string) error {
 	if c == nil || c.imageCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Tag(ctx, imageID, repository, tag)
 }
@@ -663,7 +683,7 @@ func (c *LocalClient) TagImage(ctx context.Context, imageID string, repository s
 // UntagImage 删除镜像标签
 func (c *LocalClient) UntagImage(ctx context.Context, imageRef string) error {
 	if c == nil || c.imageCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Untag(ctx, imageRef)
 }
@@ -671,7 +691,7 @@ func (c *LocalClient) UntagImage(ctx context.Context, imageRef string) error {
 // SaveImage 导出镜像到 tar 文件
 func (c *LocalClient) SaveImage(ctx context.Context, imageIDs []string) (io.ReadCloser, error) {
 	if c == nil || c.imageCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Save(ctx, imageIDs)
 }
@@ -679,7 +699,7 @@ func (c *LocalClient) SaveImage(ctx context.Context, imageIDs []string) (io.Read
 // LoadImage 从 tar 文件加载镜像
 func (c *LocalClient) LoadImage(ctx context.Context, input io.Reader, quiet bool) error {
 	if c == nil || c.imageCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Load(ctx, input, quiet)
 }
@@ -687,7 +707,7 @@ func (c *LocalClient) LoadImage(ctx context.Context, input io.Reader, quiet bool
 // PullImage 拉取镜像
 func (c *LocalClient) PullImage(ctx context.Context, imageRef string) (io.ReadCloser, error) {
 	if c == nil || c.imageCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Pull(ctx, imageRef)
 }
@@ -695,7 +715,7 @@ func (c *LocalClient) PullImage(ctx context.Context, imageRef string) (io.ReadCl
 // PushImage 推送镜像到 registry
 func (c *LocalClient) PushImage(ctx context.Context, imageRef string) (io.ReadCloser, error) {
 	if c == nil || c.imageCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.imageCli.Push(ctx, imageRef)
 }
@@ -720,7 +740,7 @@ func (c *LocalClient) WatchEvents(ctx context.Context) (<-chan ContainerEvent, <
 
 		// 检查客户端是否初始化
 		if c == nil || c.cli == nil {
-			errorChan <- fmt.Errorf("Docker 客户端未初始化")
+			errorChan <- fmt.Errorf("Docker client not initialized")
 			return
 		}
 
@@ -739,7 +759,7 @@ func (c *LocalClient) WatchEvents(ctx context.Context) (<-chan ContainerEvent, <
 				return
 			case err := <-errChan:
 				if err != nil {
-					errorChan <- fmt.Errorf("监听 Docker 事件失败: %w", err)
+					errorChan <- fmt.Errorf("failed to watch Docker events: %w", err)
 					return
 				}
 			case msg := <-msgChan:
@@ -780,12 +800,12 @@ func (c *LocalClient) WatchEvents(ctx context.Context) (<-chan ContainerEvent, <
 // StartContainer 启动已停止的容器
 func (c *LocalClient) StartContainer(ctx context.Context, containerID string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
 	if err != nil {
-		return fmt.Errorf("启动容器失败: %w", err)
+		return fmt.Errorf("failed to start container: %w", err)
 	}
 
 	return nil
@@ -794,7 +814,7 @@ func (c *LocalClient) StartContainer(ctx context.Context, containerID string) er
 // StopContainer 停止运行中的容器
 func (c *LocalClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	// 设置超时时间
@@ -807,7 +827,7 @@ func (c *LocalClient) StopContainer(ctx context.Context, containerID string, tim
 		Timeout: timeoutPtr,
 	})
 	if err != nil {
-		return fmt.Errorf("停止容器失败: %w", err)
+		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
 	return nil
@@ -816,7 +836,7 @@ func (c *LocalClient) StopContainer(ctx context.Context, containerID string, tim
 // RestartContainer 重启容器
 func (c *LocalClient) RestartContainer(ctx context.Context, containerID string, timeout int) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	// 设置超时时间
@@ -829,7 +849,7 @@ func (c *LocalClient) RestartContainer(ctx context.Context, containerID string, 
 		Timeout: timeoutPtr,
 	})
 	if err != nil {
-		return fmt.Errorf("重启容器失败: %w", err)
+		return fmt.Errorf("failed to restart container: %w", err)
 	}
 
 	return nil
@@ -838,7 +858,7 @@ func (c *LocalClient) RestartContainer(ctx context.Context, containerID string, 
 // RemoveContainer 删除容器
 func (c *LocalClient) RemoveContainer(ctx context.Context, containerID string, force bool, removeVolumes bool) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	err := c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
@@ -846,7 +866,7 @@ func (c *LocalClient) RemoveContainer(ctx context.Context, containerID string, f
 		RemoveVolumes: removeVolumes,
 	})
 	if err != nil {
-		return fmt.Errorf("删除容器失败: %w", err)
+		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
 	return nil
@@ -855,12 +875,12 @@ func (c *LocalClient) RemoveContainer(ctx context.Context, containerID string, f
 // PauseContainer 暂停容器
 func (c *LocalClient) PauseContainer(ctx context.Context, containerID string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	err := c.cli.ContainerPause(ctx, containerID)
 	if err != nil {
-		return fmt.Errorf("暂停容器失败: %w", err)
+		return fmt.Errorf("failed to pause container: %w", err)
 	}
 
 	return nil
@@ -869,12 +889,12 @@ func (c *LocalClient) PauseContainer(ctx context.Context, containerID string) er
 // UnpauseContainer 恢复暂停的容器
 func (c *LocalClient) UnpauseContainer(ctx context.Context, containerID string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	err := c.cli.ContainerUnpause(ctx, containerID)
 	if err != nil {
-		return fmt.Errorf("恢复容器失败: %w", err)
+		return fmt.Errorf("failed to unpause container: %w", err)
 	}
 
 	return nil
@@ -883,7 +903,7 @@ func (c *LocalClient) UnpauseContainer(ctx context.Context, containerID string) 
 // UpdateContainer 更新容器配置
 func (c *LocalClient) UpdateContainer(ctx context.Context, containerID string, config ContainerUpdateConfig) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	// 构建更新配置
@@ -936,7 +956,7 @@ func (c *LocalClient) UpdateContainer(ctx context.Context, containerID string, c
 // ListNetworks 获取网络列表
 func (c *LocalClient) ListNetworks(ctx context.Context) ([]Network, error) {
 	if c == nil || c.networkCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.List(ctx)
 }
@@ -944,7 +964,7 @@ func (c *LocalClient) ListNetworks(ctx context.Context) ([]Network, error) {
 // NetworkDetails 获取指定网络的详细信息
 func (c *LocalClient) NetworkDetails(ctx context.Context, networkID string) (*NetworkDetails, error) {
 	if c == nil || c.networkCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.GetDetails(ctx, networkID)
 }
@@ -952,7 +972,7 @@ func (c *LocalClient) NetworkDetails(ctx context.Context, networkID string) (*Ne
 // CreateNetwork 创建网络
 func (c *LocalClient) CreateNetwork(ctx context.Context, opts NetworkCreateOptions) (string, error) {
 	if c == nil || c.networkCli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.Create(ctx, opts)
 }
@@ -960,7 +980,7 @@ func (c *LocalClient) CreateNetwork(ctx context.Context, opts NetworkCreateOptio
 // RemoveNetwork 删除网络
 func (c *LocalClient) RemoveNetwork(ctx context.Context, networkID string) error {
 	if c == nil || c.networkCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.Remove(ctx, networkID)
 }
@@ -968,7 +988,7 @@ func (c *LocalClient) RemoveNetwork(ctx context.Context, networkID string) error
 // PruneNetworks 清理未使用的网络
 func (c *LocalClient) PruneNetworks(ctx context.Context) ([]string, error) {
 	if c == nil || c.networkCli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.Prune(ctx)
 }
@@ -976,7 +996,7 @@ func (c *LocalClient) PruneNetworks(ctx context.Context) ([]string, error) {
 // ConnectNetwork 将容器连接到网络
 func (c *LocalClient) ConnectNetwork(ctx context.Context, networkID string, opts NetworkConnectOptions) error {
 	if c == nil || c.networkCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.Connect(ctx, networkID, opts)
 }
@@ -984,7 +1004,7 @@ func (c *LocalClient) ConnectNetwork(ctx context.Context, networkID string, opts
 // DisconnectNetwork 将容器从网络断开
 func (c *LocalClient) DisconnectNetwork(ctx context.Context, networkID string, opts NetworkDisconnectOptions) error {
 	if c == nil || c.networkCli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.Disconnect(ctx, networkID, opts)
 }
@@ -992,7 +1012,82 @@ func (c *LocalClient) DisconnectNetwork(ctx context.Context, networkID string, o
 // InspectNetworkRaw 获取网络的原始 JSON 数据
 func (c *LocalClient) InspectNetworkRaw(ctx context.Context, networkID string) (string, error) {
 	if c == nil || c.networkCli == nil {
-		return "", fmt.Errorf("Docker 客户端未初始化")
+		return "", fmt.Errorf("Docker client not initialized")
 	}
 	return c.networkCli.InspectRaw(ctx, networkID)
+}
+
+// ContainerTop 获取容器内进程列表（类似 docker top）
+func (c *LocalClient) ContainerTop(ctx context.Context, containerID string) ([]ProcessInfo, error) {
+	if c == nil || c.cli == nil {
+		return nil, fmt.Errorf("Docker client not initialized")
+	}
+
+	// 调用 Docker SDK 获取进程列表
+	// 不传参数，使用默认的 ps 输出格式（包含宿主机 PID）
+	topResult, err := c.cli.ContainerTop(ctx, containerID, []string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container process list: %w", err)
+	}
+
+	// 解析结果 - 根据 Titles 动态映射字段
+	// 默认输出通常是: UID, PID, PPID, C, STIME, TTY, TIME, CMD
+	titleMap := make(map[string]int)
+	for i, title := range topResult.Titles {
+		titleMap[strings.ToUpper(title)] = i
+	}
+
+	processes := make([]ProcessInfo, 0, len(topResult.Processes))
+	for _, proc := range topResult.Processes {
+		p := ProcessInfo{}
+		
+		// PID - 这是宿主机的 PID
+		if idx, ok := titleMap["PID"]; ok && idx < len(proc) {
+			p.PID = proc[idx]
+		}
+		// PPID - 父进程 ID（宿主机）
+		if idx, ok := titleMap["PPID"]; ok && idx < len(proc) {
+			p.PPID = proc[idx]
+		}
+		// USER/UID
+		if idx, ok := titleMap["USER"]; ok && idx < len(proc) {
+			p.User = proc[idx]
+		} else if idx, ok := titleMap["UID"]; ok && idx < len(proc) {
+			p.User = proc[idx]
+		}
+		// CPU (C 列)
+		if idx, ok := titleMap["C"]; ok && idx < len(proc) {
+			p.CPU = proc[idx]
+		} else if idx, ok := titleMap["%CPU"]; ok && idx < len(proc) {
+			p.CPU = proc[idx]
+		}
+		// STIME/START
+		if idx, ok := titleMap["STIME"]; ok && idx < len(proc) {
+			p.Start = proc[idx]
+		} else if idx, ok := titleMap["START"]; ok && idx < len(proc) {
+			p.Start = proc[idx]
+		}
+		// TTY
+		if idx, ok := titleMap["TTY"]; ok && idx < len(proc) {
+			p.TTY = proc[idx]
+		}
+		// TIME
+		if idx, ok := titleMap["TIME"]; ok && idx < len(proc) {
+			p.Time = proc[idx]
+		}
+		// CMD/COMMAND
+		if idx, ok := titleMap["CMD"]; ok && idx < len(proc) {
+			p.Command = proc[idx]
+		} else if idx, ok := titleMap["COMMAND"]; ok && idx < len(proc) {
+			p.Command = proc[idx]
+		}
+		// STAT
+		if idx, ok := titleMap["STAT"]; ok && idx < len(proc) {
+			p.Stat = proc[idx]
+		}
+		
+		processes = append(processes, p)
+	}
+
+	return processes, nil
 }

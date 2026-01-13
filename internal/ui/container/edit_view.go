@@ -356,17 +356,17 @@ func (v *EditView) View() string {
 			containerName = containerName[:22] + "..."
 		}
 	}
-	title := editTitleStyle.Render("⚙️  编辑容器配置: " + containerName)
+	title := editTitleStyle.Render("⚙️  Edit Container Config: " + containerName)
 
 	// 当前配置信息
 	currentPolicy := "no"
 	if v.details != nil && v.details.RestartPolicy != "" {
 		currentPolicy = v.details.RestartPolicy
 	}
-	currentInfo := editHintStyle.Render("当前重启策略: ") + editValueStyle.Render(currentPolicy)
+	currentInfo := editHintStyle.Render("Current restart policy: ") + editValueStyle.Render(currentPolicy)
 
 	// 重启策略选择
-	restartLabel := editLabelStyle.Render("重启策略:")
+	restartLabel := editLabelStyle.Render("Restart Policy:")
 	var policyOptions []string
 	for i, p := range v.restartPolicies {
 		if i == v.restartPolicyIdx {
@@ -384,32 +384,32 @@ func (v *EditView) View() string {
 	// 最大重试次数（仅 on-failure 时显示）
 	var retriesLine string
 	if v.restartPolicies[v.restartPolicyIdx] == "on-failure" {
-		retriesLabel := editLabelStyle.Render("最大重试:")
+		retriesLabel := editLabelStyle.Render("Max Retries:")
 		retriesInputStyle := lipgloss.NewStyle()
 		if v.focusIndex == 1 {
 			retriesInputStyle = retriesInputStyle.Foreground(lipgloss.Color("81"))
 		}
 		retriesLine = retriesLabel + " " + retriesInputStyle.Render(v.maxRetriesInput.View()) +
-			editHintStyle.Render(" (次，0=无限)")
+			editHintStyle.Render(" (times, 0=unlimited)")
 	}
 
 	// CPU 份额
-	cpuLabel := editLabelStyle.Render("CPU 份额:")
+	cpuLabel := editLabelStyle.Render("CPU Shares:")
 	cpuInputStyle := lipgloss.NewStyle()
 	if v.focusIndex == 2 {
 		cpuInputStyle = cpuInputStyle.Foreground(lipgloss.Color("81"))
 	}
 	cpuLine := cpuLabel + " " + cpuInputStyle.Render(v.cpuSharesInput.View()) +
-		editHintStyle.Render(" (默认 1024，留空不修改)")
+		editHintStyle.Render(" (default 1024, leave empty to keep unchanged)")
 
 	// 内存限制
-	memLabel := editLabelStyle.Render("内存限制:")
+	memLabel := editLabelStyle.Render("Memory Limit:")
 	memInputStyle := lipgloss.NewStyle()
 	if v.focusIndex == 3 {
 		memInputStyle = memInputStyle.Foreground(lipgloss.Color("81"))
 	}
 	memLine := memLabel + " " + memInputStyle.Render(v.memoryInput.View()) +
-		editHintStyle.Render(" MB (须大于当前使用量)")
+		editHintStyle.Render(" MB (must be greater than current usage)")
 
 	// 按钮
 	cancelBtnStyle := lipgloss.NewStyle().Padding(0, 2)
@@ -427,8 +427,8 @@ func (v *EditView) View() string {
 		okBtnStyle = okBtnStyle.Foreground(lipgloss.Color("245"))
 	}
 
-	cancelBtn := cancelBtnStyle.Render("< 取消 >")
-	okBtn := okBtnStyle.Render("< 确认 >")
+	cancelBtn := cancelBtnStyle.Render("< Cancel >")
+	okBtn := okBtnStyle.Render("< Confirm >")
 	buttons := cancelBtn + "    " + okBtn
 
 	// 错误信息
@@ -438,8 +438,8 @@ func (v *EditView) View() string {
 	}
 
 	// 提示
-	hints := editHintStyle.Render("[Tab/↑↓=切换] [←→=选择策略] [Enter=确认] [Esc=取消]")
-	note := editHintStyle.Render("注: CPU/内存限制仅 Linux 原生 Docker 支持")
+	hints := editHintStyle.Render("[Tab/↑↓=Switch] [←→=Select policy] [Enter=Confirm] [Esc=Cancel]")
+	note := editHintStyle.Render("Note: CPU/Memory limits only supported on Linux native Docker")
 
 	// 组合内容
 	var contentParts []string

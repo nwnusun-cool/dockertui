@@ -101,7 +101,7 @@ type ShellsDetectErrorMsg struct {
 // detectShells 检测容器中可用的 Shell
 func (s *ShellSelector) detectShells() tea.Msg {
 	if s.containerID == "" {
-		return ShellsDetectErrorMsg{Err: fmt.Errorf("容器 ID 为空")}
+		return ShellsDetectErrorMsg{Err: fmt.Errorf("container ID is empty")}
 	}
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -127,7 +127,7 @@ func (s *ShellSelector) detectShells() tea.Msg {
 	}
 	
 	if len(shells) == 0 {
-		return ShellsDetectErrorMsg{Err: fmt.Errorf("容器中没有可用的 Shell")}
+		return ShellsDetectErrorMsg{Err: fmt.Errorf("no available shell in container")}
 	}
 	
 	return ShellsDetectedMsg{Shells: shells}
@@ -203,18 +203,18 @@ func (s *ShellSelector) View() string {
 	var content strings.Builder
 	
 	// 标题
-	content.WriteString(titleStyle.Render("🐚 选择 Shell"))
+	content.WriteString(titleStyle.Render("🐚 Select Shell"))
 	content.WriteString("\n")
-	content.WriteString(subtitleStyle.Render("容器: " + s.containerName))
+	content.WriteString(subtitleStyle.Render("Container: " + s.containerName))
 	content.WriteString("\n\n")
 	
 	if s.loading {
-		content.WriteString(subtitleStyle.Render("⏳ 正在检测可用的 Shell..."))
+		content.WriteString(subtitleStyle.Render("⏳ Detecting available shells..."))
 	} else if s.errorMsg != "" {
 		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 		content.WriteString(errorStyle.Render("❌ " + s.errorMsg))
 		content.WriteString("\n\n")
-		content.WriteString(subtitleStyle.Render("按 Esc 返回"))
+		content.WriteString(subtitleStyle.Render("Press Esc to go back"))
 	} else {
 		// Shell 列表
 		for i, shell := range s.shells {
@@ -261,10 +261,10 @@ func (s *ShellSelector) View() string {
 		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 		
 		hints := []string{
-			keyStyle.Render("↑/↓") + hintStyle.Render(" 选择"),
-			keyStyle.Render("Enter") + hintStyle.Render(" 确认"),
-			keyStyle.Render("1-6") + hintStyle.Render(" 快捷选择"),
-			keyStyle.Render("Esc") + hintStyle.Render(" 取消"),
+			keyStyle.Render("↑/↓") + hintStyle.Render(" Select"),
+			keyStyle.Render("Enter") + hintStyle.Render(" Confirm"),
+			keyStyle.Render("1-6") + hintStyle.Render(" Quick select"),
+			keyStyle.Render("Esc") + hintStyle.Render(" Cancel"),
 		}
 		content.WriteString(hintStyle.Render(strings.Join(hints, "  ")))
 	}

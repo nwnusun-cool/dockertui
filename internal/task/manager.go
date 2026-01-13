@@ -83,7 +83,7 @@ func (m *Manager) Submit(task Task) string {
 		TaskID:   task.ID(),
 		TaskName: task.Name(),
 		Type:     EventStarted,
-		Message:  "任务已提交",
+		Message:  "Task submitted",
 		Time:     time.Now(),
 	})
 
@@ -111,7 +111,7 @@ func (m *Manager) runTask(task Task) {
 				TaskID:   task.ID(),
 				TaskName: task.Name(),
 				Type:     EventCancelled,
-				Message:  "任务已取消",
+				Message:  "Task cancelled",
 				Time:     time.Now(),
 			})
 		} else {
@@ -130,7 +130,7 @@ func (m *Manager) runTask(task Task) {
 			TaskName: task.Name(),
 			Type:     EventCompleted,
 			Progress: 100,
-			Message:  "任务完成",
+			Message:  "Task completed",
 			Time:     time.Now(),
 		})
 	}

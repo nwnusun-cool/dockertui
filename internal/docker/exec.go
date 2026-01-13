@@ -30,7 +30,7 @@ type ExecResult struct {
 // 返回命令的输出和错误
 func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, config ExecConfig) (*ExecResult, error) {
 	if c == nil || c.cli == nil {
-		return nil, fmt.Errorf("Docker 客户端未初始化")
+		return nil, fmt.Errorf("Docker client not initialized")
 	}
 
 	// 创建 exec 实例
@@ -46,7 +46,7 @@ func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, confi
 
 	execCreateResp, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return nil, fmt.Errorf("创建 exec 实例失败: %w", err)
+		return nil, fmt.Errorf("failed to create exec instance: %w", err)
 	}
 
 	// 附加到 exec
@@ -54,7 +54,7 @@ func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, confi
 		Tty: config.Tty,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("附加到 exec 失败: %w", err)
+		return nil, fmt.Errorf("failed to attach to exec: %w", err)
 	}
 	defer execAttachResp.Close()
 
@@ -77,7 +77,7 @@ func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, confi
 	// 获取执行结果
 	inspectResp, err := c.cli.ContainerExecInspect(ctx, execCreateResp.ID)
 	if err != nil {
-		return nil, fmt.Errorf("获取 exec 结果失败: %w", err)
+		return nil, fmt.Errorf("failed to get exec result: %w", err)
 	}
 
 	result := &ExecResult{
@@ -85,7 +85,7 @@ func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, confi
 	}
 
 	if inspectResp.ExitCode != 0 {
-		result.Error = fmt.Sprintf("命令退出码: %d", inspectResp.ExitCode)
+		result.Error = fmt.Sprintf("command exit code: %d", inspectResp.ExitCode)
 	}
 
 	return result, nil
@@ -95,14 +95,14 @@ func (c *LocalClient) ExecCommand(ctx context.Context, containerID string, confi
 // 这是一个简化的实现，适用于基本的交互式场景
 func (c *LocalClient) ExecShell(ctx context.Context, containerID string, shell string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	// 如果未指定 shell，自动检测可用的 shell
 	if shell == "" {
 		detectedShell, err := c.detectShell(ctx, containerID)
 		if err != nil {
-			return fmt.Errorf("无法检测容器中的 shell: %w", err)
+			return fmt.Errorf("unable to detect shell in container: %w", err)
 		}
 		shell = detectedShell
 	}
@@ -119,7 +119,7 @@ func (c *LocalClient) ExecShell(ctx context.Context, containerID string, shell s
 	// 创建 exec 实例
 	execCreateResp, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return fmt.Errorf("创建 exec 实例失败: %w", err)
+		return fmt.Errorf("failed to create exec instance: %w", err)
 	}
 
 	// 附加到 exec
@@ -127,7 +127,7 @@ func (c *LocalClient) ExecShell(ctx context.Context, containerID string, shell s
 		Tty: true,
 	})
 	if err != nil {
-		return fmt.Errorf("附加到 exec 失败: %w", err)
+		return fmt.Errorf("failed to attach to exec: %w", err)
 	}
 	defer execAttachResp.Close()
 
@@ -200,7 +200,7 @@ func (c *LocalClient) detectShell(ctx context.Context, containerID string) (stri
 		}
 	}
 
-	return "", fmt.Errorf("容器中没有可用的 shell (尝试了: %v)", shells)
+	return "", fmt.Errorf("no available shell in container (tried: %v)", shells)
 }
 
 // checkShellExists 检查指定的 shell 是否存在于容器中
@@ -238,14 +238,14 @@ func (c *LocalClient) checkShellExists(ctx context.Context, containerID string, 
 // 注意：这个方法会修改终端状态，调用前应确保终端已被释放
 func (c *LocalClient) ExecShellInteractive(ctx context.Context, containerID string, shell string) error {
 	if c == nil || c.cli == nil {
-		return fmt.Errorf("Docker 客户端未初始化")
+		return fmt.Errorf("Docker client not initialized")
 	}
 
 	// 如果未指定 shell，自动检测可用的 shell
 	if shell == "" {
 		detectedShell, err := c.detectShell(ctx, containerID)
 		if err != nil {
-			return fmt.Errorf("无法检测容器中的 shell: %w", err)
+			return fmt.Errorf("unable to detect shell in container: %w", err)
 		}
 		shell = detectedShell
 	}
@@ -262,7 +262,7 @@ func (c *LocalClient) ExecShellInteractive(ctx context.Context, containerID stri
 	// 创建 exec 实例
 	execCreateResp, err := c.cli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return fmt.Errorf("创建 exec 实例失败: %w", err)
+		return fmt.Errorf("failed to create exec instance: %w", err)
 	}
 
 	// 附加到 exec
@@ -270,7 +270,7 @@ func (c *LocalClient) ExecShellInteractive(ctx context.Context, containerID stri
 		Tty: true,
 	})
 	if err != nil {
-		return fmt.Errorf("附加到 exec 失败: %w", err)
+		return fmt.Errorf("failed to attach to exec: %w", err)
 	}
 	defer execAttachResp.Close()
 
@@ -289,22 +289,22 @@ func (c *LocalClient) ExecShellInteractive(ctx context.Context, containerID stri
 	// 从容器复制到 stdout
 	_, err = io.Copy(os.Stdout, execAttachResp.Reader)
 	if err != nil {
-		return fmt.Errorf("读取容器输出失败: %w", err)
+		return fmt.Errorf("failed to read container output: %w", err)
 	}
 
 	// 等待输入复制完成
 	if err := <-errChan; err != nil && err != io.EOF {
-		return fmt.Errorf("写入容器输入失败: %w", err)
+		return fmt.Errorf("failed to write container input: %w", err)
 	}
 
 	// 检查执行结果
 	inspectResp, err := c.cli.ContainerExecInspect(ctx, execCreateResp.ID)
 	if err != nil {
-		return fmt.Errorf("获取 exec 结果失败: %w", err)
+		return fmt.Errorf("failed to get exec result: %w", err)
 	}
 
 	if inspectResp.ExitCode != 0 {
-		return fmt.Errorf("shell 退出码: %d", inspectResp.ExitCode)
+		return fmt.Errorf("shell exit code: %d", inspectResp.ExitCode)
 	}
 
 	return nil

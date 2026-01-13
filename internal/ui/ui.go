@@ -15,7 +15,6 @@ import (
 
 	"docktui/internal/compose"
 	"docktui/internal/docker"
-	"docktui/internal/i18n"
 	"docktui/internal/ui/components"
 	composeui "docktui/internal/ui/compose"
 	containerui "docktui/internal/ui/container"
@@ -24,18 +23,18 @@ import (
 )
 
 // Global theme colors - using adaptive colors, not hardcoding background
-// 让终端自己处理背景，只设置前景色
+// Let terminal handle background, only set foreground color
 var (
-	// 主文字颜色 - 使用终端默认前景色（不设置）
+	// 主文本颜色 - 使用终端默认前景色（不设置）
 	// ThemeTextColor - 不再使用固定颜色
 	
-	// 次要文字颜色 - 灰色，在亮色和暗色终端都可读
+	// 次要文本颜色 - 灰色，在浅色和深色终端上都可读
 	ThemeTextMuted = lipgloss.Color("245")
 	
-	// 边框颜色 - 中性灰色
+	// 边框颜色 - 中性灰
 	ThemeBorderColor = lipgloss.Color("240")
 	
-	// 高亮颜色 - 青色，在两种主题下都醒目
+	// 高亮颜色 - 青色，在两种主题上都醒目
 	ThemeHighlight = lipgloss.Color("81")
 	
 	// 成功颜色 - 绿色
@@ -47,14 +46,14 @@ var (
 	// 错误颜色 - 红色
 	ThemeError = lipgloss.Color("196")
 	
-	// 标题颜色 - 黄色/金色
+	// 标题颜色 - 黄/金色
 	ThemeTitleColor = lipgloss.Color("220")
 	
 	// 按键提示颜色 - 青色
 	ThemeKeyColor = lipgloss.Color("81")
 )
 
-// ViewType 表示当前显示的视图类型
+// ViewType 表示当前视图类型
 type ViewType int
 
 const (
@@ -82,10 +81,10 @@ const (
 	ViewComposeDetail
 )
 
-// View 接口定义了所有视图必须实现的方法
-// 每个视图都应实现 Bubble Tea 的 Init、Update、View 方法
+// View 接口定义所有视图必须实现的方法
+// 每个视图应实现 Bubble Tea 的 Init, Update, View 方法
 type View interface {
-	// Init 初始化视图，返回初始化命令
+	// Init 初始化视图并返回初始化命令
 	Init() tea.Cmd
 	
 	// Update 处理消息并更新视图状态
@@ -98,7 +97,7 @@ type View interface {
 	SetSize(width, height int)
 }
 
-// Model 是 TUI 的主模型，包含全局状态
+// Model 是主 TUI 模型，包含全局状态
 type Model struct {
 	// Docker 客户端
 	dockerClient docker.Client
@@ -122,16 +121,16 @@ type Model struct {
 	
 	// 全局状态字段
 	selectedContainerID string   // 当前选中的容器 ID
-	previousView        ViewType // 上一个视图（用于返回）
+	previousView        ViewType // 上一个视图（用于返回导航）
 	showShellSelector   bool     // 是否显示 Shell 选择器
 	
 	// 错误和状态显示
-	errorMsg        string    // 错误消息（致命错误，常驻显示）
+	errorMsg        string    // 错误消息（致命错误，持久显示）
 	warningMsg      string    // 警告消息（5秒后自动消失）
-	infoMsg         string    // 信息提示（3秒后自动消失）
-	successMsg      string    // 成功提示（3秒后自动消失）
+	infoMsg         string    // 信息消息（3秒后自动消失）
+	successMsg      string    // 成功消息（3秒后自动消失）
 	msgExpireTime   time.Time // 消息过期时间
-	ready           bool      // 是否已完成初始化
+	ready           bool      // 是否初始化完成
 	dockerConnected bool      // Docker 是否已连接
 	
 	// 窗口尺寸（用于响应式布局）
@@ -140,7 +139,7 @@ type Model struct {
 }
 
 func NewModel(dockerClient docker.Client) Model {
-	// 初始化各个视图
+	// 初始化所有视图
 	homeView := NewHomeView(dockerClient)
 	containerListView := containerui.NewListView(dockerClient)
 	containerDetailView := containerui.NewDetailView(dockerClient)
@@ -184,14 +183,14 @@ func NewModel(dockerClient docker.Client) Model {
 	}
 }
 
-// SetDockerError 设置 Docker 连接错误（致命错误，常驻显示）
+// SetDockerError 设置 Docker 连接错误（致命错误，持久显示）
 func SetDockerError(m Model, errMsg string) Model {
 	m.dockerConnected = false
 	m.errorMsg = errMsg
 	return m
 }
 
-// SetTemporaryMessage 设置临时消息（支持自动消失）
+// SetTemporaryMessage 设置临时消息（带自动消失）
 type MessageType int
 
 const (
@@ -238,7 +237,7 @@ type shellExitedMsg struct {
 	err error
 }
 
-// execShellMsg 执行 shell 的消息类型
+// execShellMsg 执行 shell 消息类型
 type execShellMsg struct {
 	containerID   string
 	containerName string
@@ -258,31 +257,31 @@ func (e execShellCmd) Run() error {
 	// 清屏（进入 shell 前）
 	fmt.Print("\033[2J\033[H")
 	
-	// Get Shell name for display
+	// 获取 Shell 名称用于显示
 	shellName := e.shell
 	if shellName == "" {
 		shellName = "auto"
 	} else {
-		// Extract Shell name (e.g. /bin/bash -> bash)
+		// 提取 Shell 名称（如 /bin/bash -> bash）
 		parts := strings.Split(shellName, "/")
 		if len(parts) > 0 {
 			shellName = parts[len(parts)-1]
 		}
 	}
 	
-	// Display hints
-	fmt.Printf("\n\033[1;36m🐚 %s: %s (%s)\033[0m\n", i18n.T("enter_shell"), e.containerName, shellName)
+	// 显示提示
+	fmt.Printf("\n\033[1;36m🐚 Entering container shell: %s (%s)\033[0m\n", e.containerName, shellName)
 	fmt.Println("\033[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
-	fmt.Printf("\033[33m%s\033[0m\n", i18n.T("shell_tips"))
-	fmt.Printf("  • %s\n", i18n.T("shell_exit_hint"))
-	fmt.Printf("  • %s\n", i18n.T("shell_return_hint"))
+	fmt.Printf("\033[33m%s\033[0m\n", "Tips:")
+	fmt.Printf("  • %s\n", "Type exit or press Ctrl+D to exit shell")
+	fmt.Printf("  • %s\n", "Will return to DockTUI after exit")
 	fmt.Println("\033[90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
 	fmt.Println()
 	
-	// Try to find docker executable
+	// 尝试查找 docker 可执行文件
 	dockerPath, err := exec.LookPath("docker")
 	if err != nil {
-		// Try common Docker installation paths
+		// 尝试常见的 Docker 安装路径
 		possiblePaths := []string{
 			"C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
 			"C:\\Program Files\\Docker\\Docker\\docker.exe",
@@ -296,21 +295,21 @@ func (e execShellCmd) Run() error {
 	}
 	
 	if dockerPath == "" {
-		// If docker not found, fallback to Docker SDK
-		fmt.Printf("\033[33m%s\033[0m\n", i18n.T("using_sdk_mode"))
+		// 如果找不到 docker，回退到 Docker SDK
+		fmt.Printf("\033[33m%s\033[0m\n", "Using Docker SDK mode...")
 		ctx := context.Background()
 		err := e.dockerClient.ExecShell(ctx, e.containerID, e.shell)
 		fmt.Print("\033[2J\033[H")
 		return err
 	}
 	
-	// Build docker exec command
+	// 构建 docker exec 命令
 	var cmd *exec.Cmd
 	if e.shell != "" {
-		// Use specified Shell
+		// 使用指定的 Shell
 		cmd = exec.Command(dockerPath, "exec", "-it", e.containerID, e.shell)
 	} else {
-		// Auto-detect Shell
+		// 自动检测 Shell
 		cmd = exec.Command(dockerPath, "exec", "-it", e.containerID, "/bin/sh", "-c", 
 			"if [ -x /bin/bash ]; then exec /bin/bash; elif [ -x /bin/ash ]; then exec /bin/ash; else exec /bin/sh; fi")
 	}
@@ -345,7 +344,7 @@ func (e execShellCmd) SetStdout(w io.Writer) {}
 // SetStderr 实现 tea.ExecCommand 接口（可选）
 func (e execShellCmd) SetStderr(w io.Writer) {}
 
-// execShell 执行容器 shell（带指定 Shell）
+// execShellWithShell 执行容器 shell（带指定 Shell）
 func (m Model) execShellWithShell(containerID, containerName, shell string) tea.Cmd {
 	return func() tea.Msg {
 		return execShellMsg{
@@ -356,7 +355,7 @@ func (m Model) execShellWithShell(containerID, containerName, shell string) tea.
 	}
 }
 
-// createExecShellCmd 创建执行 shell 的命令
+// createExecShellCmd 创建执行 shell 命令
 func (m Model) createExecShellCmd(containerID, containerName, shell string) tea.ExecCommand {
 	return execShellCmd{
 		dockerClient:  m.dockerClient,
@@ -367,7 +366,7 @@ func (m Model) createExecShellCmd(containerID, containerName, shell string) tea.
 }
 
 func (m Model) Init() tea.Cmd {
-	// 初始化首页视图，加载统计数据
+	// 初始化首页视图，加载统计信息
 	if m.homeView != nil {
 		return m.homeView.Init()
 	}
@@ -377,7 +376,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case GoBackMsg, imageui.GoBackMsg, networkui.GoBackMsg, composeui.GoBackMsg:
-		// 视图请求返回上一级
+		// 视图请求返回
 		return m.goBack()
 	
 	// ========== 视图切换请求消息 ==========
@@ -472,23 +471,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, initCmd
 	
+	case composeui.GoToContainerLogsMsg:
+		// Compose 详情视图请求跳转到容器日志
+		if m.logsView != nil {
+			m.logsView.SetContainer(msg.ContainerID, msg.ContainerName)
+		}
+		m.previousView = m.currentView
+		m.currentView = ViewLogs
+		var initCmd tea.Cmd
+		if m.logsView != nil {
+			initCmd = m.logsView.Init()
+		}
+		return m, initCmd
+	
+	case composeui.ExecContainerShellMsg:
+		// Compose 详情视图请求执行容器 Shell
+		m.selectedContainerID = msg.ContainerID
+		m.showShellSelector = true
+		m.shellSelector.SetContainer(msg.ContainerID, msg.ContainerName)
+		m.shellSelector.SetSize(m.width, m.height)
+		return m, m.shellSelector.Init()
+	
 	case containerui.GoBackMsg:
-		// 容器视图请求返回上一级
+		// 容器视图请求返回
 		return m.goBack()
 	
 	case execShellMsg:
-		// Execute shell command
-		// Use tea.Exec to temporarily release terminal control
+		// 执行 shell 命令
+		// 使用 tea.Exec 临时释放终端控制
 		return m, tea.Exec(m.createExecShellCmd(msg.containerID, msg.containerName, msg.shell), func(err error) tea.Msg {
 			return shellExitedMsg{err: err}
 		})
 	
 	case shellExitedMsg:
-		// Refresh UI after shell exits
+		// shell 退出后刷新 UI
 		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("%s: %v", i18n.T("shell_exec_failed"), msg.err)
+			m.errorMsg = fmt.Sprintf("Shell execution failed: %v", msg.err)
 		}
-		// Re-enter alt screen and refresh
+		// 重新进入 alt screen 并刷新
 		return m, tea.Sequence(
 			tea.EnterAltScreen,
 			tea.ClearScreen,
@@ -498,7 +518,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		
 	case clearMessageMsg:
-		// Check if message has expired
+		// 检查消息是否已过期
 		if time.Now().After(m.msgExpireTime) {
 			m.infoMsg = ""
 			m.successMsg = ""
@@ -507,7 +527,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 		
 	case tea.WindowSizeMsg:
-		// Window size changed, update model and all views
+		// 窗口大小改变，更新模型和所有视图
 		m.width = msg.Width
 		m.height = msg.Height
 		
@@ -664,29 +684,29 @@ func (m Model) handleGlobalKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleWelcomeKeys handle welcome screen shortcuts
+// handleWelcomeKeys 处理欢迎界面快捷键
 func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.dockerConnected {
-		// Docker not connected, only support exit
+		// Docker 未连接，只支持退出
 		return m, nil
 	}
 	
-	// Navigation keys handled by HomeView
+	// 导航键由 HomeView 处理
 	switch msg.String() {
 	case "up", "down", "left", "right", "h", "j", "k", "l", "tab":
 		if m.homeView != nil {
 			m.homeView.Update(msg)
 		}
-		// Return empty command to prevent delegateToCurrentView from processing again
+		// 返回空命令以防止 delegateToCurrentView 再次处理
 		return m, func() tea.Msg { return nil }
 	case "L":
-		// Toggle language
+		// 切换语言
 		if m.homeView != nil {
 			m.homeView.Update(msg)
 		}
 		return m, func() tea.Msg { return nil }
 	case "r", "f5":
-		// Refresh
+		// 刷新
 		if m.homeView != nil {
 			return m, m.homeView.Init()
 		}
@@ -695,11 +715,11 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	
 	switch msg.String() {
 	case "enter":
-		// Enter corresponding view based on selected card
+		// 根据选中的卡片进入对应视图
 		if m.homeView != nil {
-			// Enter view based on selected resource
+			// 根据选中的资源进入视图
 			if !m.homeView.IsResourceAvailable() {
-				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("feature_unavailable"), 3)
+				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ This feature is unavailable", 3)
 			}
 			
 			switch m.homeView.GetSelectedResource() {
@@ -716,51 +736,51 @@ func (m Model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 		
 	case "1":
-		// Enter container list directly
+		// 直接进入容器列表
 		return m.enterContainerList()
 		
 	case "2":
-		// Enter image list
+		// 进入镜像列表
 		return m.enterImageList()
 	
 	case "3", "4":
-		// Network and volume management (in development)
-		return m, m.SetTemporaryMessage(MsgInfo, "🚧 "+i18n.T("feature_in_development"), 3)
+		// 网络和卷管理（开发中）
+		return m, m.SetTemporaryMessage(MsgInfo, "🚧 This feature is in development...", 3)
 	
 	case "5":
-		// Enter Compose view
+		// 进入 Compose 视图
 		return m.enterComposeList()
 		
 	case "c":
-		// Shortcut to enter container list
+		// 快捷键进入容器列表
 		return m.enterContainerList()
 	
 	case "i":
-		// Shortcut to enter image list
+		// 快捷键进入镜像列表
 		return m.enterImageList()
 	
 	case "n":
-		// Shortcut to enter network management
+		// 快捷键进入网络管理
 		return m.enterNetworkList()
 	
 	case "v":
-		// Shortcut to enter volume management (in development)
-		return m, m.SetTemporaryMessage(MsgInfo, "💾 "+i18n.T("volume_in_development"), 3)
+		// 快捷键进入卷管理（开发中）
+		return m, m.SetTemporaryMessage(MsgInfo, "💾 Volume management is in development...", 3)
 	
 	case "o":
-		// Shortcut to enter Compose view
+		// 快捷键进入 Compose 视图
 		return m.enterComposeList()
 	}
 	
 	return m, nil
 }
 
-// enterContainerList enter container list view
+// enterContainerList 进入容器列表视图
 func (m Model) enterContainerList() (tea.Model, tea.Cmd) {
 	m.previousView = m.currentView
 	m.currentView = ViewContainerList
 	
-	// Trigger container list view initialization, load data
+	// 触发容器列表视图初始化，加载数据
 	var initCmd tea.Cmd
 	if m.containerListView != nil {
 		initCmd = m.containerListView.Init()
@@ -769,66 +789,72 @@ func (m Model) enterContainerList() (tea.Model, tea.Cmd) {
 	return m, initCmd
 }
 
-// enterComposeList enter Compose project list view
+// enterComposeList 进入 Compose 项目列表视图
 func (m Model) enterComposeList() (tea.Model, tea.Cmd) {
 	if m.composeListView == nil {
-		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("compose_unavailable"), 3)
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Docker Compose is not installed or unavailable", 3)
 	}
 	
 	m.previousView = m.currentView
 	m.currentView = ViewComposeList
 	
-	// Trigger Compose list view initialization, scan projects
+	// 触发 Compose 列表视图初始化，扫描项目
 	initCmd := m.composeListView.Init()
 	
 	return m, initCmd
 }
 
-// enterImageList enter image list view
+// enterImageList 进入镜像列表视图
 func (m Model) enterImageList() (tea.Model, tea.Cmd) {
 	if m.imageListView == nil {
-		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("images")+" "+i18n.T("view_not_initialized"), 3)
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Images view not initialized", 3)
 	}
 	
 	m.previousView = m.currentView
 	m.currentView = ViewImageList
 	
-	// Trigger image list view initialization, load data
+	// 触发镜像列表视图初始化，加载数据
 	initCmd := m.imageListView.Init()
 	
 	return m, initCmd
 }
 
-// enterNetworkList enter network list view
+// enterNetworkList 进入网络列表视图
 func (m Model) enterNetworkList() (tea.Model, tea.Cmd) {
 	if m.networkListView == nil {
-		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("networks")+" "+i18n.T("view_not_initialized"), 3)
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Networks view not initialized", 3)
 	}
 	
 	m.previousView = m.currentView
 	m.currentView = ViewNetworkList
 	
-	// Trigger network list view initialization, load data
+	// 触发网络列表视图初始化，加载数据
 	initCmd := m.networkListView.Init()
 	
 	return m, initCmd
 }
 
-// goBack return to previous view
+// goBack 返回上一个视图
 func (m Model) goBack() (tea.Model, tea.Cmd) {
-	// Already on home page, do nothing
+	// 已经在首页，不做任何操作
 	if m.currentView == ViewWelcome {
 		return m, nil
 	}
 	
-	// Determine where to go back based on current view (hierarchical navigation)
+	// 根据当前视图确定返回位置（层级导航）
 	switch m.currentView {
 	case ViewContainerList:
 		m.currentView = ViewWelcome
 	case ViewContainerDetail:
-		m.currentView = ViewContainerList
+		// 如果是从 Compose 详情进入的，返回 Compose 详情
+		if m.previousView == ViewComposeDetail {
+			m.currentView = ViewComposeDetail
+		} else {
+			m.currentView = ViewContainerList
+		}
 	case ViewLogs:
-		if m.previousView == ViewContainerDetail || m.previousView == ViewContainerList {
+		// 返回到之前的视图（可能是容器详情、容器列表或 Compose 详情）
+		if m.previousView == ViewContainerDetail || m.previousView == ViewContainerList || m.previousView == ViewComposeDetail {
 			m.currentView = m.previousView
 		} else {
 			m.currentView = ViewContainerList
@@ -865,63 +891,63 @@ func (m Model) handleContainerListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// 如果处于搜索模式、显示确认对话框、编辑视图、错误弹窗或 JSON 查看器，让视图自己处理
 	if m.containerListView != nil {
 		if m.containerListView.IsSearching() || m.containerListView.IsEditViewVisible() || m.containerListView.HasError() || m.containerListView.IsShowingJSONViewer() {
-			return m, nil  // Return nil, let Update pass to view
+			return m, nil  // 返回 nil，让 Update 传递给视图
 		}
 	}
 	
 	switch msg.String() {
 	case "s":
-		// Enter container Shell - show Shell selector (needs access to global shellSelector)
+		// 进入容器 Shell - 显示 Shell 选择器（需要访问全局 shellSelector）
 		if m.containerListView != nil {
 			if container := m.containerListView.GetSelectedContainer(); container != nil {
-				// Check if container is running
+				// 检查容器是否正在运行
 				if container.State != "running" {
-					return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("only_running_container"), 3)
+					return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Can only execute shell in running containers", 3)
 				}
 				
-				// Set selected container info
+				// 设置选中的容器信息
 				m.selectedContainerID = container.ID
 				
-				// Show Shell selector
+				// 显示 Shell 选择器
 				m.showShellSelector = true
 				m.shellSelector.SetContainer(container.ID, container.Name)
 				m.shellSelector.SetSize(m.width, m.height)
 				m.shellSelector.SetCallbacks(
 					func(shell string) {
-						// Callback after selecting Shell will be handled in Update
+						// 选择 Shell 后的回调将在 Update 中处理
 					},
 					func() {
-						// Cancel callback will be handled in Update
+						// 取消回调将在 Update 中处理
 					},
 				)
 				return m, m.shellSelector.Init()
 			} else {
-				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("select_container_first"), 3)
+				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Please select a container first", 3)
 			}
 		}
-		return m, m.SetTemporaryMessage(MsgError, "❌ "+i18n.T("view_error"), 3)
+		return m, m.SetTemporaryMessage(MsgError, "❌ View error", 3)
 	}
 	
-	// Other keys not handled, return nil to let Update pass to view
+	// 其他按键未处理，返回 nil 让 Update 传递给视图
 	return m, nil
 }
 
-// handleContainerDetailKeys handle container detail view shortcuts
+// handleContainerDetailKeys 处理容器详情视图的快捷键
 func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Only handle specific shortcuts, let view handle others
+	// 只处理特定快捷键，其他让视图处理
 	switch msg.String() {
 	case "l":
-		// View container logs from detail view
+		// 从详情视图查看容器日志
 		if m.selectedContainerID != "" {
-			// Get container name from detail view
-			containerName := m.selectedContainerID[:12] // Default to short ID
+			// 从详情视图获取容器名称
+			containerName := m.selectedContainerID[:12] // 默认使用短 ID
 			if m.containerDetailView != nil {
 				if details := m.containerDetailView.GetDetails(); details != nil {
 					containerName = details.Name
 				}
 			}
 			
-			// Set container info for logs view
+			// 为日志视图设置容器信息
 			if m.logsView != nil {
 				m.logsView.SetContainer(m.selectedContainerID, containerName)
 			}
@@ -929,23 +955,23 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.previousView = m.currentView
 			m.currentView = ViewLogs
 			
-			// Initialize logs view
+			// 初始化日志视图
 			var initCmd tea.Cmd
 			if m.logsView != nil {
 				initCmd = m.logsView.Init()
 			}
 			
 			return m, tea.Batch(
-				m.SetTemporaryMessage(MsgSuccess, fmt.Sprintf("📜 %s: %s", i18n.T("loading_logs"), containerName), 3),
+				m.SetTemporaryMessage(MsgSuccess, fmt.Sprintf("📜 Loading logs: %s", containerName), 3),
 				initCmd,
 			)
 		}
-		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("select_container_first"), 3)
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Please select a container first", 3)
 		
 	case "s":
-		// Enter container Shell - show Shell selector
+		// 进入容器 Shell - 显示 Shell 选择器
 		if m.selectedContainerID != "" {
-			// Get container name and state from detail view
+			// 从详情视图获取容器名称和状态
 			containerName := m.selectedContainerID[:12]
 			containerState := "unknown"
 			if m.containerDetailView != nil {
@@ -955,34 +981,34 @@ func (m Model) handleContainerDetailKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			
-			// Check if container is running
+			// 检查容器是否正在运行
 			if containerState != "running" {
-				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("only_running_container"), 3)
+				return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Can only execute shell in running containers", 3)
 			}
 			
-			// Show Shell selector
+			// 显示 Shell 选择器
 			m.showShellSelector = true
 			m.shellSelector.SetContainer(m.selectedContainerID, containerName)
 			m.shellSelector.SetSize(m.width, m.height)
 			return m, m.shellSelector.Init()
 		}
-		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ "+i18n.T("select_container_first"), 3)
+		return m, m.SetTemporaryMessage(MsgWarning, "⚠️ Please select a container first", 3)
 	}
 	
-	// Other keys not handled, return nil to let message pass to view
+	// 其他按键未处理，返回 nil 让消息传递给视图
 	return m, nil
 }
 
-// handleLogsKeys handle logs view shortcuts
+// handleLogsKeys 处理日志视图的快捷键
 func (m Model) handleLogsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Logs view handles all its own keys, don't intercept any here
+	// 日志视图处理所有自己的按键，这里不拦截任何按键
 	return m, nil
 }
 
-// handleHelpKeys handle help view shortcuts
+// handleHelpKeys 处理帮助视图的快捷键
 func (m Model) handleHelpKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// In help view, ESC/b handled globally
-	// No keys need to be handled here
+	// 在帮助视图中，ESC/b 由全局处理
+	// 这里不需要处理任何按键
 	return m, nil
 }
 
@@ -993,7 +1019,6 @@ func (m Model) handleComposeListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleImageListKeys 处理镜像列表视图的快捷键
 // handleImageListKeys 处理镜像列表视图的快捷键
 // 注意：大部分按键由视图自己处理，这里只保留必要的全局快捷键
 func (m Model) handleImageListKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1065,94 +1090,94 @@ func visibleLength(s string) int {
 }
 
 func (m Model) View() string {
-	// If Shell selector is showing, render it first
+	// 如果 Shell 选择器正在显示，优先渲染它
 	if m.showShellSelector && m.shellSelector != nil {
 		return m.shellSelector.View()
 	}
 	
 	var content string
 	
-	// Display different content based on current view type
+	// 根据当前视图类型显示不同内容
 	switch m.currentView {
 	case ViewWelcome:
 		if m.homeView != nil {
 			content = m.homeView.View()
 		} else {
-			content = "🏠 Home " + i18n.T("view_not_initialized")
+			content = "🏠 Home view not initialized"
 		}
 	case ViewContainerList:
 		if m.containerListView != nil {
 			content = m.containerListView.View()
 		} else {
-			content = "📦 " + i18n.T("containers") + " " + i18n.T("view_not_initialized")
+			content = "📦 Containers view not initialized"
 		}
 	case ViewContainerDetail:
 		if m.containerDetailView != nil {
 			content = m.containerDetailView.View()
 		} else {
-			content = "📋 Container Detail " + i18n.T("view_not_initialized")
+			content = "📋 Container details view not initialized"
 		}
 	case ViewLogs:
 		if m.logsView != nil {
 			content = m.logsView.View()
 		} else {
-			content = "📜 " + i18n.T("logs") + " " + i18n.T("view_not_initialized")
+			content = "📜 Logs view not initialized"
 		}
 	case ViewHelp:
 		if m.helpView != nil {
 			content = m.helpView.View()
 		} else {
-			content = "🆘 " + i18n.T("help") + " " + i18n.T("view_not_initialized")
+			content = "🆘 Help view not initialized"
 		}
 	case ViewComposeList:
 		if m.composeListView != nil {
 			content = m.composeListView.View()
 		} else {
-			content = "🧩 " + i18n.T("compose") + " " + i18n.T("view_not_initialized")
+			content = "🧩 Compose view not initialized"
 		}
 	case ViewComposeDetail:
 		if m.composeDetailView != nil {
 			content = m.composeDetailView.View()
 		} else {
-			content = "🧩 Compose Detail " + i18n.T("view_not_initialized")
+			content = "🧩 Compose details view not initialized"
 		}
 	case ViewImageList:
 		if m.imageListView != nil {
 			content = m.imageListView.View()
 		} else {
-			content = "🖼️ " + i18n.T("images") + " " + i18n.T("view_not_initialized")
+			content = "🖼️ Images view not initialized"
 		}
 	case ViewImageDetails:
 		if m.imageDetailsView != nil {
 			content = m.imageDetailsView.View()
 		} else {
-			content = "🖼️ Image Detail " + i18n.T("view_not_initialized")
+			content = "🖼️ Image details view not initialized"
 		}
 	case ViewNetworkList:
 		if m.networkListView != nil {
 			content = m.networkListView.View()
 		} else {
-			content = "🌐 " + i18n.T("networks") + " " + i18n.T("view_not_initialized")
+			content = "🌐 Networks view not initialized"
 		}
 	case ViewNetworkDetail:
 		if m.networkDetailView != nil {
 			content = m.networkDetailView.View()
 		} else {
-			content = "🌐 Network Detail " + i18n.T("view_not_initialized")
+			content = "🌐 Network details view not initialized"
 		}
 	default:
-		content = i18n.T("unknown_view")
+		content = "Unknown view"
 	}
 	
-	// Add tiered message display (not for container list, Compose list, Compose detail, image list and network list views)
+	// 添加分层消息显示（不适用于容器列表、Compose 列表、Compose 详情、镜像列表和网络列表视图）
 	if m.currentView != ViewContainerList && m.currentView != ViewComposeList && m.currentView != ViewComposeDetail && m.currentView != ViewImageList && m.currentView != ViewNetworkList {
 		if m.errorMsg != "" && m.dockerConnected {
 			errorStyle := lipgloss.NewStyle().Foreground(ThemeError).Bold(true)
-			content = "\n" + errorStyle.Render("❌ "+i18n.T("fatal_error")+": "+m.errorMsg) + "\n" + content
+			content = "\n" + errorStyle.Render("❌ Fatal error: "+m.errorMsg) + "\n" + content
 		}
 		if m.warningMsg != "" {
 			warnStyle := lipgloss.NewStyle().Foreground(ThemeWarning).Bold(true)
-			content += "\n\n" + warnStyle.Render("⚠️ "+i18n.T("warning")+": "+m.warningMsg)
+			content += "\n\n" + warnStyle.Render("⚠️ Warning: "+m.warningMsg)
 		}
 		if m.infoMsg != "" {
 			infoStyle := lipgloss.NewStyle().Foreground(ThemeHighlight)

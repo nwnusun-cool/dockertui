@@ -33,6 +33,10 @@ type ListView struct {
 
 	lastRefreshTime time.Time
 	autoRefresh     bool
+
+	// 操作日志视图
+	operationLogView *OperationLogView
+	operationStream  *composelib.OperationStream
 }
 
 // NewListView 创建 Compose 列表视图
@@ -43,10 +47,10 @@ func NewListView(composeClient composelib.Client, dockerCli *sdk.Client) *ListVi
 	}
 
 	columns := []table.Column{
-		{Title: "项目名称", Width: 20},
-		{Title: "状态", Width: 10},
-		{Title: "服务", Width: 10},
-		{Title: "路径", Width: 40},
+		{Title: "Project Name", Width: 20},
+		{Title: "Status", Width: 10},
+		{Title: "Services", Width: 10},
+		{Title: "Path", Width: 40},
 	}
 
 	t := table.New(
@@ -68,11 +72,12 @@ func NewListView(composeClient composelib.Client, dockerCli *sdk.Client) *ListVi
 	t.SetStyles(s)
 
 	return &ListView{
-		composeClient: composeClient,
-		discovery:     discovery,
-		tableModel:    t,
-		loading:       false,
-		autoRefresh:   false,
+		composeClient:    composeClient,
+		discovery:        discovery,
+		tableModel:       t,
+		loading:          false,
+		autoRefresh:      false,
+		operationLogView: NewOperationLogView(),
 	}
 }
 
@@ -88,7 +93,7 @@ func (v *ListView) Update(msg tea.Msg) tea.Cmd {
 	case listScanResultMsg:
 		v.loading = false
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("发现项目失败: %v", msg.err)
+			v.errorMsg = fmt.Sprintf("Failed to discover projects: %v", msg.err)
 		} else {
 			v.projects = msg.projects
 			v.errorMsg = ""
@@ -101,7 +106,7 @@ func (v *ListView) Update(msg tea.Msg) tea.Cmd {
 		v.operatingProject = nil
 		v.operationType = ""
 		if msg.err != nil {
-			v.errorMsg = fmt.Sprintf("操作失败: %v", msg.err)
+			v.errorMsg = fmt.Sprintf("Operation failed: %v", msg.err)
 			v.successMsg = ""
 		} else {
 			v.successMsg = msg.message
@@ -120,7 +125,38 @@ func (v *ListView) Update(msg tea.Msg) tea.Cmd {
 		v.errorMsg = ""
 		return nil
 
+	case detailOperationLogMsg:
+		// 追加日志行
+		if v.operationLogView != nil {
+			v.operationLogView.AppendLog(msg.line)
+		}
+		// 继续监听更多日志
+		return v.continueListenOperationStream()
+
+	case detailOperationDoneMsg:
+		// 操作完成
+		if v.operationLogView != nil && msg.result != nil {
+			v.operationLogView.SetComplete(msg.result.Success, msg.result.Message)
+		}
+		v.operatingProject = nil
+		v.operationType = ""
+		v.operationStream = nil
+		// 刷新项目状态
+		return v.refreshProjectStatus
+
 	case tea.KeyMsg:
+		// 如果操作日志视图可见，优先处理
+		if v.operationLogView != nil && v.operationLogView.IsVisible() {
+			if v.operationLogView.Update(msg) {
+				// 如果日志视图关闭了，清理状态
+				if !v.operationLogView.IsVisible() {
+					v.operatingProject = nil
+					v.operationType = ""
+				}
+				return nil
+			}
+		}
+
 		if v.operatingProject != nil {
 			return nil
 		}
@@ -154,7 +190,7 @@ func (v *ListView) Update(msg tea.Msg) tea.Cmd {
 			v.loading = true
 			return v.discoverProjects
 		case "l":
-			v.successMsg = "📜 日志功能开发中..."
+			v.successMsg = "📜 Log feature in development..."
 			return v.clearMessageAfter(3)
 		case "enter":
 			project := v.GetSelectedProject()
@@ -191,7 +227,14 @@ func (v *ListView) View() string {
 	content := v.renderContent()
 	footer := v.renderFooter()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	baseView := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+
+	// 如果操作日志视图可见，叠加显示
+	if v.operationLogView != nil && v.operationLogView.IsVisible() {
+		return v.operationLogView.Overlay(baseView)
+	}
+
+	return baseView
 }
 
 // SetSize 设置视图尺寸
@@ -199,6 +242,9 @@ func (v *ListView) SetSize(width, height int) {
 	v.width = width
 	v.height = height
 	v.updateTableColumns()
+	if v.operationLogView != nil {
+		v.operationLogView.SetSize(width, height)
+	}
 }
 
 // GetSelectedProject 获取当前选中的项目
@@ -214,7 +260,7 @@ func (v *ListView) GetSelectedProject() *composelib.Project {
 }
 
 func (v *ListView) renderHeader() string {
-	title := "🧩 Docker Compose 项目"
+	title := "🧩 Docker Compose Projects"
 
 	runningCount := 0
 	for _, p := range v.projects {
@@ -222,11 +268,11 @@ func (v *ListView) renderHeader() string {
 			runningCount++
 		}
 	}
-	stats := fmt.Sprintf("共 %d 个项目，%d 个运行中", len(v.projects), runningCount)
+	stats := fmt.Sprintf("Total %d projects, %d running", len(v.projects), runningCount)
 
 	var refreshInfo string
 	if !v.lastRefreshTime.IsZero() {
-		refreshInfo = fmt.Sprintf("上次刷新: %s", v.lastRefreshTime.Format("15:04:05"))
+		refreshInfo = fmt.Sprintf("Last refresh: %s", v.lastRefreshTime.Format("15:04:05"))
 	}
 
 	headerContent := fmt.Sprintf(" %s  │  %s  │  %s ", title, stats, refreshInfo)
@@ -246,7 +292,7 @@ func (v *ListView) renderContent() string {
 	}
 
 	if v.loading {
-		loadingMsg := LoadingStyle.Render("🔄 正在发现 Compose 项目...")
+		loadingMsg := LoadingStyle.Render("🔄 Discovering Compose projects...")
 		centered := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(loadingMsg)
 		content.WriteString("\n\n")
 		content.WriteString(centered)
@@ -254,7 +300,7 @@ func (v *ListView) renderContent() string {
 	}
 
 	if v.operatingProject != nil {
-		opMsg := LoadingStyle.Render(fmt.Sprintf("⏳ 正在执行 %s: %s...", v.operationType, v.operatingProject.Name))
+		opMsg := LoadingStyle.Render(fmt.Sprintf("⏳ Executing %s: %s...", v.operationType, v.operatingProject.Name))
 		centered := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(opMsg)
 		content.WriteString("\n")
 		content.WriteString(centered)
@@ -262,7 +308,7 @@ func (v *ListView) renderContent() string {
 	}
 
 	if len(v.projects) == 0 && !v.loading {
-		emptyMsg := EmptyStyle.Render("📭 未发现运行中的 Compose 项目\n\n提示：请先使用 docker compose up -d 启动项目")
+		emptyMsg := EmptyStyle.Render("📭 No running Compose projects found\n\nTip: Please start a project with docker compose up -d first")
 		centered := lipgloss.NewStyle().Width(v.width).Align(lipgloss.Center).Render(emptyMsg)
 		content.WriteString("\n\n")
 		content.WriteString(centered)
@@ -275,28 +321,28 @@ func (v *ListView) renderContent() string {
 
 func (v *ListView) renderFooter() string {
 	line1Keys := []string{
-		FooterKeyStyle.Render("u") + "=启动",
-		FooterKeyStyle.Render("d") + "=停止",
-		FooterKeyStyle.Render("r") + "=重启",
-		FooterKeyStyle.Render("s") + "=暂停",
-		FooterKeyStyle.Render("t") + "=恢复",
+		FooterKeyStyle.Render("u") + "=Start",
+		FooterKeyStyle.Render("d") + "=Stop",
+		FooterKeyStyle.Render("r") + "=Restart",
+		FooterKeyStyle.Render("s") + "=Pause",
+		FooterKeyStyle.Render("t") + "=Resume",
 	}
-	line1 := " 操作：" + strings.Join(line1Keys, "  ")
+	line1 := " Ops: " + strings.Join(line1Keys, "  ")
 
 	line2Keys := []string{
-		FooterKeyStyle.Render("l") + "=日志",
-		FooterKeyStyle.Render("R") + "=刷新",
-		FooterKeyStyle.Render("Enter") + "=详情",
+		FooterKeyStyle.Render("l") + "=Logs",
+		FooterKeyStyle.Render("R") + "=Refresh",
+		FooterKeyStyle.Render("Enter") + "=Details",
 	}
-	line2 := " 查看：" + strings.Join(line2Keys, "  ")
+	line2 := " View: " + strings.Join(line2Keys, "  ")
 
 	line3Keys := []string{
-		FooterKeyStyle.Render("j/k") + "=上下移动",
-		FooterKeyStyle.Render("g/G") + "=首/尾",
-		FooterKeyStyle.Render("Esc") + "=返回",
-		FooterKeyStyle.Render("q") + "=退出",
+		FooterKeyStyle.Render("j/k") + "=Up/Down",
+		FooterKeyStyle.Render("g/G") + "=Top/Bottom",
+		FooterKeyStyle.Render("Esc") + "=Back",
+		FooterKeyStyle.Render("q") + "=Quit",
 	}
-	line3 := " 导航：" + strings.Join(line3Keys, "  ")
+	line3 := " Nav: " + strings.Join(line3Keys, "  ")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		FooterStyle.Width(v.width).Render(line1),
@@ -311,15 +357,15 @@ func (v *ListView) updateTable() {
 		var status string
 		switch p.Status {
 		case composelib.StatusRunning:
-			status = "● 运行中"
+			status = "● Running"
 		case composelib.StatusPartial:
-			status = "◐ 部分"
+			status = "◐ Partial"
 		case composelib.StatusStopped:
-			status = "○ 已停止"
+			status = "○ Stopped"
 		case composelib.StatusError:
-			status = "✗ 错误"
+			status = "✗ Error"
 		default:
-			status = "? 未知"
+			status = "? Unknown"
 		}
 
 		runningServices := 0
@@ -362,17 +408,17 @@ func (v *ListView) updateTableColumns() {
 	}
 
 	columns := []table.Column{
-		{Title: "项目名称", Width: nameWidth},
-		{Title: "状态", Width: statusWidth},
-		{Title: "服务", Width: servicesWidth},
-		{Title: "路径", Width: pathWidth},
+		{Title: "Project Name", Width: nameWidth},
+		{Title: "Status", Width: statusWidth},
+		{Title: "Services", Width: servicesWidth},
+		{Title: "Path", Width: pathWidth},
 	}
 	v.tableModel.SetColumns(columns)
 }
 
 func (v *ListView) discoverProjects() tea.Msg {
 	if v.discovery == nil {
-		return listScanResultMsg{err: fmt.Errorf("项目发现器未初始化")}
+		return listScanResultMsg{err: fmt.Errorf("project discovery not initialized")}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -405,7 +451,7 @@ func (v *ListView) refreshProjectStatus() tea.Msg {
 func (v *ListView) startOperation(opType string) tea.Cmd {
 	project := v.GetSelectedProject()
 	if project == nil {
-		v.errorMsg = "请先选择一个项目"
+		v.errorMsg = "Please select a project first"
 		return v.clearMessageAfter(3)
 	}
 
@@ -414,13 +460,27 @@ func (v *ListView) startOperation(opType string) tea.Cmd {
 	v.errorMsg = ""
 	v.successMsg = ""
 
+	// 对于 up 和 down 操作，使用流式执行
+	if opType == "up" || opType == "down" {
+		// 显示操作日志视图
+		opNames := map[string]string{"up": "Starting Project", "down": "Stopping Project"}
+		title := opNames[opType] + ": " + project.Name
+
+		if v.operationLogView != nil {
+			v.operationLogView.SetSize(v.width, v.height)
+			v.operationLogView.Show(title)
+		}
+
+		return v.executeOperationStream(project, opType)
+	}
+
 	return v.executeOperation(project, opType)
 }
 
 func (v *ListView) executeOperation(project *composelib.Project, opType string) tea.Cmd {
 	return func() tea.Msg {
 		if v.composeClient == nil {
-			return listOperationResultMsg{err: fmt.Errorf("Compose 客户端未初始化")}
+			return listOperationResultMsg{err: fmt.Errorf("Compose client not initialized")}
 		}
 
 		var result *composelib.OperationResult
@@ -438,7 +498,7 @@ func (v *ListView) executeOperation(project *composelib.Project, opType string) 
 		case "start":
 			result, err = v.composeClient.Start(project, nil)
 		default:
-			return listOperationResultMsg{err: fmt.Errorf("未知操作: %s", opType)}
+			return listOperationResultMsg{err: fmt.Errorf("unknown operation: %s", opType)}
 		}
 
 		if err != nil {
@@ -450,8 +510,8 @@ func (v *ListView) executeOperation(project *composelib.Project, opType string) 
 		}
 
 		opNames := map[string]string{
-			"up": "启动", "down": "停止", "restart": "重启",
-			"stop": "暂停", "start": "恢复",
+			"up": "Start", "down": "Stop", "restart": "Restart",
+			"stop": "Pause", "start": "Resume",
 		}
 		opName := opNames[opType]
 		if opName == "" {
@@ -459,9 +519,62 @@ func (v *ListView) executeOperation(project *composelib.Project, opType string) 
 		}
 
 		return listOperationResultMsg{
-			message: fmt.Sprintf("%s 项目 %s 成功", opName, project.Name),
+			message: fmt.Sprintf("%s project %s succeeded", opName, project.Name),
 		}
 	}
+}
+
+// executeOperationStream 流式执行项目操作
+func (v *ListView) executeOperationStream(project *composelib.Project, opType string) tea.Cmd {
+	wrapper, ok := v.composeClient.(*composelib.ComposeClientWrapper)
+	if !ok {
+		// 回退到非流式方法
+		return v.executeOperation(project, opType)
+	}
+
+	var stream *composelib.OperationStream
+	switch opType {
+	case "up":
+		stream = wrapper.UpStream(project, composelib.UpOptions{Detach: true})
+	case "down":
+		stream = wrapper.DownStream(project, composelib.DownOptions{})
+	default:
+		return v.executeOperation(project, opType)
+	}
+
+	v.operationStream = stream
+
+	return v.listenOperationStream()
+}
+
+// listenOperationStream 监听操作流
+func (v *ListView) listenOperationStream() tea.Cmd {
+	if v.operationStream == nil {
+		return nil
+	}
+
+	return func() tea.Msg {
+		select {
+		case line, ok := <-v.operationStream.LogChan:
+			if ok {
+				return detailOperationLogMsg{line: line}
+			}
+			return nil
+		case result, ok := <-v.operationStream.DoneChan:
+			if ok {
+				return detailOperationDoneMsg{result: result}
+			}
+			return nil
+		}
+	}
+}
+
+// continueListenOperationStream 继续监听操作流
+func (v *ListView) continueListenOperationStream() tea.Cmd {
+	if v.operationStream == nil {
+		return nil
+	}
+	return v.listenOperationStream()
 }
 
 func (v *ListView) clearMessageAfter(seconds int) tea.Cmd {

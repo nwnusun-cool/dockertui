@@ -209,13 +209,13 @@ func (v *ExportInputView) View() string {
 
 	var s strings.Builder
 
-	title := exportInputTitleStyle.Render("📦 导出镜像")
+	title := exportInputTitleStyle.Render("📦 Export Images")
 	s.WriteString(title + "\n\n")
 
-	s.WriteString(exportInputLabelStyle.Render("待导出镜像:") + "\n")
+	s.WriteString(exportInputLabelStyle.Render("Images to export:") + "\n")
 	for i, img := range v.images {
 		if i >= 5 {
-			s.WriteString(exportInputHintStyle.Render("  ... 还有 "+string(rune('0'+len(v.images)-5))+" 个镜像") + "\n")
+			s.WriteString(exportInputHintStyle.Render("  ... and "+string(rune('0'+len(v.images)-5))+" more images") + "\n")
 			break
 		}
 		name := img.Repository + ":" + img.Tag
@@ -226,7 +226,7 @@ func (v *ExportInputView) View() string {
 	}
 	s.WriteString("\n")
 
-	dirLabel := exportInputLabelStyle.Render("导出目录:")
+	dirLabel := exportInputLabelStyle.Render("Export directory:")
 	dirValue := v.exportDir
 	if v.isEditing {
 		before := dirValue[:v.cursorPos]
@@ -235,57 +235,57 @@ func (v *ExportInputView) View() string {
 		dirValue = before + cursor + after
 	}
 	if v.focusField == 0 {
-		dirLabel = exportInputSelectedStyle.Render("▶ 导出目录:")
+		dirLabel = exportInputSelectedStyle.Render("▶ Export directory:")
 	}
 	s.WriteString(dirLabel + " " + dirValue)
 	if v.focusField == 0 && !v.isEditing {
-		s.WriteString(" " + exportInputHintStyle.Render("[Enter 编辑]"))
+		s.WriteString(" " + exportInputHintStyle.Render("[Enter to edit]"))
 	}
 	s.WriteString("\n\n")
 
-	modeLabel := exportInputLabelStyle.Render("导出模式:")
-	modeValue := "多文件（每个镜像单独导出）"
+	modeLabel := exportInputLabelStyle.Render("Export mode:")
+	modeValue := "Multiple files (each image separately)"
 	if v.exportMode == ExportModeSingle {
-		modeValue = "单文件（所有镜像打包）"
+		modeValue = "Single file (all images bundled)"
 	}
 	if v.focusField == 1 {
-		modeLabel = exportInputSelectedStyle.Render("▶ 导出模式:")
+		modeLabel = exportInputSelectedStyle.Render("▶ Export mode:")
 	}
 	s.WriteString(modeLabel + " " + exportInputValueStyle.Render(modeValue))
 	if v.focusField == 1 {
-		s.WriteString(" " + exportInputHintStyle.Render("[Enter/Space 切换]"))
+		s.WriteString(" " + exportInputHintStyle.Render("[Enter/Space to toggle]"))
 	}
 	s.WriteString("\n\n")
 
-	compressLabel := exportInputLabelStyle.Render("Gzip 压缩:")
-	compressValue := "否"
+	compressLabel := exportInputLabelStyle.Render("Gzip compress:")
+	compressValue := "No"
 	if v.compress {
-		compressValue = "是"
+		compressValue = "Yes"
 	}
 	if v.focusField == 2 {
-		compressLabel = exportInputSelectedStyle.Render("▶ Gzip 压缩:")
+		compressLabel = exportInputSelectedStyle.Render("▶ Gzip compress:")
 	}
 	s.WriteString(compressLabel + " " + exportInputValueStyle.Render(compressValue))
 	if v.focusField == 2 {
-		s.WriteString(" " + exportInputHintStyle.Render("[Enter/Space 切换]"))
+		s.WriteString(" " + exportInputHintStyle.Render("[Enter/Space to toggle]"))
 	}
 	s.WriteString("\n\n")
 
-	confirmBtn := "[确认导出]"
-	cancelBtn := "[取消]"
+	confirmBtn := "[Confirm Export]"
+	cancelBtn := "[Cancel]"
 	if v.focusField == 3 {
-		confirmBtn = exportInputSelectedStyle.Render("▶ [确认导出]")
+		confirmBtn = exportInputSelectedStyle.Render("▶ [Confirm Export]")
 	} else {
 		confirmBtn = exportInputLabelStyle.Render(confirmBtn)
 	}
 	if v.focusField == 4 {
-		cancelBtn = exportInputSelectedStyle.Render("▶ [取消]")
+		cancelBtn = exportInputSelectedStyle.Render("▶ [Cancel]")
 	} else {
 		cancelBtn = exportInputLabelStyle.Render(cancelBtn)
 	}
 	s.WriteString("  " + confirmBtn + "    " + cancelBtn + "\n\n")
 
-	s.WriteString(exportInputHintStyle.Render("Tab/j/k=切换  Enter=确认  ESC=取消"))
+	s.WriteString(exportInputHintStyle.Render("Tab/j/k=Switch  Enter=Confirm  ESC=Cancel"))
 
 	boxWidth := 60
 	if v.width > 0 && v.width < boxWidth+10 {

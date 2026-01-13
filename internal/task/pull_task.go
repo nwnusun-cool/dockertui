@@ -24,7 +24,7 @@ type PullClient interface {
 func NewPullTask(client docker.Client, imageRef string) *PullTask {
 	taskID := GenerateTaskID()
 	return &PullTask{
-		BaseTask:     NewBaseTask(taskID, fmt.Sprintf("拉取 %s", imageRef)),
+		BaseTask:     NewBaseTask(taskID, fmt.Sprintf("Pull %s", imageRef)),
 		imageRef:     imageRef,
 		dockerClient: client,
 	}
@@ -45,12 +45,12 @@ func (t *PullTask) GetProgress() docker.PullProgress {
 // Run 执行拉取任务
 func (t *PullTask) Run(ctx context.Context) error {
 	t.SetStatus(StatusRunning)
-	t.SetMessage("正在连接...")
+	t.SetMessage("Connecting...")
 
 	// 类型断言获取带进度的拉取方法
 	pullClient, ok := t.dockerClient.(*docker.LocalClient)
 	if !ok {
-		err := fmt.Errorf("客户端不支持进度拉取")
+		err := fmt.Errorf("client does not support progress pull")
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
 		return err
@@ -61,7 +61,7 @@ func (t *PullTask) Run(ctx context.Context) error {
 	if err != nil {
 		t.SetStatus(StatusFailed)
 		t.SetError(err)
-		t.SetMessage("拉取失败: " + err.Error())
+		t.SetMessage("Pull failed: " + err.Error())
 		return err
 	}
 
@@ -73,7 +73,7 @@ func (t *PullTask) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			t.SetStatus(StatusCancelled)
-			t.SetMessage("已取消")
+			t.SetMessage("Cancelled")
 			return ctx.Err()
 		default:
 		}
@@ -101,7 +101,7 @@ func (t *PullTask) Run(ctx context.Context) error {
 		if progress.Status == docker.PullStatusComplete {
 			t.SetStatus(StatusCompleted)
 			t.SetProgress(100)
-			t.SetMessage("拉取完成")
+			t.SetMessage("Pull completed")
 			return nil
 		}
 	}
@@ -110,7 +110,7 @@ func (t *PullTask) Run(ctx context.Context) error {
 	if t.Status() != StatusCompleted && t.Status() != StatusFailed {
 		t.SetStatus(StatusCompleted)
 		t.SetProgress(100)
-		t.SetMessage("拉取完成")
+		t.SetMessage("Pull completed")
 	}
 
 	return t.Error()

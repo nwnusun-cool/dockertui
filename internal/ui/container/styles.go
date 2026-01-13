@@ -1,78 +1,46 @@
 package container
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"docktui/internal/ui/styles"
+)
 
-// 容器列表视图样式定义 - 使用自适应颜色，不硬编码背景色
+// 容器模块样式 - 引用全局样式
 var (
-	// 状态栏样式
-	StatusBarLabelStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-	
-	StatusBarValueStyle = lipgloss.NewStyle()
-	
-	StatusBarKeyStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81"))
-	
-	// 标题栏样式
-	TitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-	
-	// 过滤状态样式
-	FilterAllStyle = lipgloss.NewStyle()
-	
-	FilterRunningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82")).
-		Bold(true)
-	
-	FilterExitedStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-	
-	// 成功/错误消息样式
-	SuccessMsgStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("82")).
-		Bold(true)
-	
-	ErrorMsgStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("196")).
-		Bold(true)
-	
-	// 搜索栏样式
-	SearchPromptStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("81")).
-		Bold(true)
-	
-	SearchHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-	
-	// 对话框样式 - 使用边框区分，不设置背景
-	DialogStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 2)
-	
-	DialogTitleStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("220")).
-		Bold(true)
-	
-	DialogWarningStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245"))
-	
-	// 按钮样式 - 使用 Reverse 实现选中效果
-	ButtonActiveStyle = lipgloss.NewStyle().
-		Reverse(true).
-		Bold(true).
-		Padding(0, 2)
-	
-	ButtonInactiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Padding(0, 2)
-	
-	// 加载/空状态框样式
-	StateBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 2).
-		Width(66)
+	// 状态栏
+	StatusBarLabelStyle = styles.StatusBarLabelStyle
+	StatusBarValueStyle = styles.StatusBarValueStyle
+	StatusBarKeyStyle   = styles.StatusBarKeyStyle
+
+	// 标题
+	TitleStyle = styles.TitleStyle
+
+	// 过滤状态
+	FilterAllStyle     = styles.TextStyle
+	FilterRunningStyle = styles.SuccessStyle
+	FilterExitedStyle  = styles.MutedStyle
+
+	// 消息
+	SuccessMsgStyle = styles.SuccessStyle
+	ErrorMsgStyle   = styles.ErrorStyle
+
+	// 搜索
+	SearchPromptStyle = styles.SearchPromptStyle
+	SearchHintStyle   = styles.SearchHintStyle
+
+	// 对话框
+	DialogStyle        = styles.DialogStyle
+	DialogTitleStyle   = styles.TitleStyle
+	DialogWarningStyle = styles.MutedStyle
+
+	// 按钮
+	ButtonActiveStyle   = styles.ButtonActiveStyle
+	ButtonInactiveStyle = styles.ButtonInactiveStyle
+
+	// 状态框
+	StateBoxStyle = styles.StateBoxStyle
+
+	// 详情视图
+	DetailBoxStyle   = styles.BoxStyle
+	DetailTitleStyle = styles.TitleStyle
+	DetailHintStyle  = styles.HintStyle
 )

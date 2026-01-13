@@ -8,14 +8,10 @@ import (
 
 	"docktui/internal/config"
 	"docktui/internal/docker"
-	"docktui/internal/i18n"
 	"docktui/internal/ui"
 )
 
 func main() {
-	// 初始化 i18n
-	i18n.Init()
-	
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -56,6 +52,6 @@ func main() {
 	)
 	
 	if err := p.Start(); err != nil {
-		log.Fatalf("启动 TUI 失败: %v", err)
+		log.Fatalf("Failed to start TUI: %v", err)
 	}
 }

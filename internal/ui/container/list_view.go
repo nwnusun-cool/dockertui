@@ -172,7 +172,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		return v, v.watchDockerEvents()
 		
 	case ContainerOperationSuccessMsg:
-		v.successMsg = fmt.Sprintf("✅ %s容器成功: %s", msg.Operation, msg.Container)
+		v.successMsg = fmt.Sprintf("✅ %s container succeeded: %s", msg.Operation, msg.Container)
 		v.successMsgTime = time.Now()
 		v.errorMsg = ""
 		return v, tea.Batch(
@@ -181,7 +181,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		)
 		
 	case ContainerOperationErrorMsg:
-		errMsg := fmt.Sprintf("%s失败 (%s): %v", msg.Operation, msg.Container, msg.Err)
+		errMsg := fmt.Sprintf("%s failed (%s): %v", msg.Operation, msg.Container, msg.Err)
 		if v.errorDialog != nil {
 			v.errorDialog.ShowError(errMsg)
 		}
@@ -196,12 +196,12 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 
 	case ContainerBatchOperationMsg:
 		if msg.FailedCount > 0 {
-			v.successMsg = fmt.Sprintf("⚠️ %s: 成功 %d 个, 失败 %d 个", msg.Operation, msg.SuccessCount, msg.FailedCount)
+			v.successMsg = fmt.Sprintf("⚠️ %s: %d succeeded, %d failed", msg.Operation, msg.SuccessCount, msg.FailedCount)
 			if msg.Err != nil && v.errorDialog != nil {
-				v.errorDialog.ShowError(fmt.Sprintf("%s失败 (%s): %v", msg.Operation, strings.Join(msg.FailedNames, ", "), msg.Err))
+				v.errorDialog.ShowError(fmt.Sprintf("%s failed (%s): %v", msg.Operation, strings.Join(msg.FailedNames, ", "), msg.Err))
 			}
 		} else {
-			v.successMsg = fmt.Sprintf("✅ %s成功: %d 个容器", msg.Operation, msg.SuccessCount)
+			v.successMsg = fmt.Sprintf("✅ %s succeeded: %d containers", msg.Operation, msg.SuccessCount)
 		}
 		v.successMsgTime = time.Now()
 		v.errorMsg = ""
@@ -225,7 +225,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 
 	case ContainerInspectErrorMsg:
 		if v.errorDialog != nil {
-			v.errorDialog.ShowError(fmt.Sprintf("获取容器信息失败: %v", msg.Err))
+			v.errorDialog.ShowError(fmt.Sprintf("Failed to get container info: %v", msg.Err))
 		}
 		return v, nil
 
@@ -380,26 +380,30 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		case msg.String() == "j", msg.String() == "down":
 			if v.scrollTable != nil {
 				v.scrollTable.MoveDown(1)
+			} else {
+				v.tableModel.MoveDown(1)
 			}
-			v.tableModel.MoveDown(1)
 			return v, nil
 		case msg.String() == "k", msg.String() == "up":
 			if v.scrollTable != nil {
 				v.scrollTable.MoveUp(1)
+			} else {
+				v.tableModel.MoveUp(1)
 			}
-			v.tableModel.MoveUp(1)
 			return v, nil
 		case msg.String() == "g":
 			if v.scrollTable != nil {
 				v.scrollTable.GotoTop()
+			} else {
+				v.tableModel.GotoTop()
 			}
-			v.tableModel.GotoTop()
 			return v, nil
 		case msg.String() == "G":
 			if v.scrollTable != nil {
 				v.scrollTable.GotoBottom()
+			} else {
+				v.tableModel.GotoBottom()
 			}
-			v.tableModel.GotoBottom()
 			return v, nil
 		case msg.String() == "t":
 			return v, v.startSelectedContainer()
@@ -542,9 +546,9 @@ func (v *ListView) View() string {
 	if v.loading {
 		loadingContent := lipgloss.JoinVertical(lipgloss.Center,
 			"",
-			StatusBarKeyStyle.Render("⏳ 正在加载容器列表..."),
+			StatusBarKeyStyle.Render("⏳ Loading container list..."),
 			"",
-			SearchHintStyle.Render("请稍候，正在从 Docker 获取数据"),
+			SearchHintStyle.Render("Please wait, fetching data from Docker"),
 			"",
 		)
 		s += "\n  " + StateBoxStyle.Render(loadingContent) + "\n"
@@ -564,7 +568,7 @@ func (v *ListView) View() string {
 		}
 		errLines = append(errLines,
 			"",
-			StatusBarKeyStyle.Render("按 r 重新加载") + SearchHintStyle.Render(" 或 ") + StatusBarKeyStyle.Render("按 Esc 返回"),
+			StatusBarKeyStyle.Render("Press r to reload") + SearchHintStyle.Render(" or ") + StatusBarKeyStyle.Render("Press Esc to go back"),
 			"",
 		)
 		errorContent := lipgloss.JoinVertical(lipgloss.Left, errLines...)
@@ -575,17 +579,17 @@ func (v *ListView) View() string {
 	if len(v.containers) == 0 {
 		emptyContent := lipgloss.JoinVertical(lipgloss.Left,
 			"",
-			SearchHintStyle.Render("📦 暂无容器"),
+			SearchHintStyle.Render("📦 No containers"),
 			"",
-			StatusBarLabelStyle.Render("💡 快速开始:"),
+			StatusBarLabelStyle.Render("💡 Quick start:"),
 			"",
-			StatusBarKeyStyle.Render("1.") + SearchHintStyle.Render(" 启动一个测试容器:"),
+			StatusBarKeyStyle.Render("1.") + SearchHintStyle.Render(" Start a test container:"),
 			SearchHintStyle.Render("   docker run -d --name test nginx"),
 			"",
-			StatusBarKeyStyle.Render("2.") + SearchHintStyle.Render(" 刷新容器列表:"),
-			SearchHintStyle.Render("   按 r 键刷新"),
+			StatusBarKeyStyle.Render("2.") + SearchHintStyle.Render(" Refresh container list:"),
+			SearchHintStyle.Render("   Press r to refresh"),
 			"",
-			SearchHintStyle.Render("提示: 容器列表会自动刷新（事件驱动模式）"),
+			SearchHintStyle.Render("Tip: Container list auto-refreshes (event-driven mode)"),
 			"",
 		)
 		s += "\n  " + StateBoxStyle.Render(emptyContent) + "\n"
@@ -636,7 +640,7 @@ func (v *ListView) View() string {
 	
 	if !v.isSearching && v.filterType != "all" {
 		filterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
-		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + SearchHintStyle.Render("按 ESC 清除筛选，按 f 切换") + "\n"
+		s += "  " + filterStyle.Render("[Filter: "+v.filterType+"]") + "  " + SearchHintStyle.Render("Press ESC to clear filter, press f to switch") + "\n"
 	}
 	
 	if v.showConfirmDialog {
@@ -692,7 +696,7 @@ func (v *ListView) renderConfirmDialogContent() string {
 	
 	warningText := "This action cannot be undone!"
 	if v.confirmContainer.State == "running" {
-		warningText = "⚠️  容器正在运行，将强制删除！"
+		warningText = "⚠️  Container is running, will force delete!"
 	}
 	
 	title := titleStyle.Render("⚠️  Delete Container: " + containerName)
@@ -786,11 +790,11 @@ func (v *ListView) renderStatusBar() string {
 	
 	row5Label := labelStyle.Render("Last Refresh:")
 	row5Info := hintStyle.Render(refreshInfo) + "    " + 
-		hintStyle.Render("j/k=上下  Enter=详情  Esc=返回  q=退出")
+		hintStyle.Render("j/k=Up/Down  Enter=Details  Esc=Back  q=Quit")
 	
 	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
 	if len(v.selectedContainers) > 0 {
-		row5Info += "    " + selectedStyle.Render(fmt.Sprintf("[已选: %d]", len(v.selectedContainers)))
+		row5Info += "    " + selectedStyle.Render(fmt.Sprintf("[Selected: %d]", len(v.selectedContainers)))
 	}
 	
 	lines = append(lines, "  "+row5Label+row5Info)
@@ -1173,7 +1177,7 @@ func (v *ListView) watchDockerEvents() tea.Cmd {
 		select {
 		case event, ok := <-eventChan:
 			if !ok {
-				return ContainerEventErrorMsg{Err: fmt.Errorf("事件通道关闭")}
+				return ContainerEventErrorMsg{Err: fmt.Errorf("event channel closed")}
 			}
 			return ContainerEventMsg{Event: event}
 		case err, ok := <-errorChan:
@@ -1190,7 +1194,7 @@ func (v *ListView) startSelectedContainer() tea.Cmd {
 	containers := v.getSelectedOrCurrentContainers()
 	if len(containers) == 0 {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "启动容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Start container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
@@ -1203,11 +1207,11 @@ func (v *ListView) startSelectedContainer() tea.Cmd {
 
 	if len(toStart) == 0 {
 		return func() tea.Msg {
-			return ContainerOperationWarningMsg{Message: "所有选中的容器都已在运行中"}
+			return ContainerOperationWarningMsg{Message: "All selected containers are already running"}
 		}
 	}
 
-	return v.batchContainerOperation("启动", toStart, func(ctx context.Context, id string) error {
+	return v.batchContainerOperation("Start", toStart, func(ctx context.Context, id string) error {
 		return v.dockerClient.StartContainer(ctx, id)
 	})
 }
@@ -1217,7 +1221,7 @@ func (v *ListView) stopSelectedContainer() tea.Cmd {
 	containers := v.getSelectedOrCurrentContainers()
 	if len(containers) == 0 {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "停止容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Stop container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
@@ -1230,11 +1234,11 @@ func (v *ListView) stopSelectedContainer() tea.Cmd {
 
 	if len(toStop) == 0 {
 		return func() tea.Msg {
-			return ContainerOperationWarningMsg{Message: "所有选中的容器都未在运行"}
+			return ContainerOperationWarningMsg{Message: "All selected containers are not running"}
 		}
 	}
 
-	return v.batchContainerOperation("停止", toStop, func(ctx context.Context, id string) error {
+	return v.batchContainerOperation("Stop", toStop, func(ctx context.Context, id string) error {
 		return v.dockerClient.StopContainer(ctx, id, 10)
 	})
 }
@@ -1244,11 +1248,11 @@ func (v *ListView) restartSelectedContainer() tea.Cmd {
 	containers := v.getSelectedOrCurrentContainers()
 	if len(containers) == 0 {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "重启容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Restart container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
-	return v.batchContainerOperation("重启", containers, func(ctx context.Context, id string) error {
+	return v.batchContainerOperation("Restart", containers, func(ctx context.Context, id string) error {
 		return v.dockerClient.RestartContainer(ctx, id, 10)
 	})
 }
@@ -1258,7 +1262,7 @@ func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
 	container := v.GetSelectedContainer()
 	if container == nil {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "删除容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Delete container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
@@ -1278,10 +1282,10 @@ func (v *ListView) removeContainer(container *docker.Container) tea.Cmd {
 		force := container.State == "running"
 		err := v.dockerClient.RemoveContainer(ctx, container.ID, force, false)
 		if err != nil {
-			return ContainerOperationErrorMsg{Operation: "删除容器", Container: container.Name, Err: err}
+			return ContainerOperationErrorMsg{Operation: "Delete container", Container: container.Name, Err: err}
 		}
 
-		return ContainerOperationSuccessMsg{Operation: "删除", Container: container.Name}
+		return ContainerOperationSuccessMsg{Operation: "Delete", Container: container.Name}
 	}
 }
 
@@ -1298,14 +1302,14 @@ func (v *ListView) togglePauseContainer() tea.Cmd {
 	container := v.GetSelectedContainer()
 	if container == nil {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "暂停/恢复容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Pause/Unpause container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
 	if container.State != "running" && container.State != "paused" {
 		return func() tea.Msg {
 			return ContainerOperationWarningMsg{
-				Message: fmt.Sprintf("容器 %s 状态为 %s，只能暂停运行中的容器或恢复已暂停的容器", container.Name, container.State),
+				Message: fmt.Sprintf("Container %s state is %s, can only pause running containers or unpause paused containers", container.Name, container.State),
 			}
 		}
 	}
@@ -1321,14 +1325,14 @@ func (v *ListView) togglePauseContainer() tea.Cmd {
 
 		if isPaused {
 			err = v.dockerClient.UnpauseContainer(ctx, container.ID)
-			operation = "恢复"
+			operation = "Unpause"
 		} else {
 			err = v.dockerClient.PauseContainer(ctx, container.ID)
-			operation = "暂停"
+			operation = "Pause"
 		}
 
 		if err != nil {
-			return ContainerOperationErrorMsg{Operation: operation + "容器", Container: container.Name, Err: err}
+			return ContainerOperationErrorMsg{Operation: operation + " container", Container: container.Name, Err: err}
 		}
 
 		return ContainerOperationSuccessMsg{Operation: operation, Container: container.Name}
@@ -1340,7 +1344,7 @@ func (v *ListView) showEditView() tea.Cmd {
 	container := v.GetSelectedContainer()
 	if container == nil {
 		return func() tea.Msg {
-			return ContainerOperationErrorMsg{Operation: "编辑容器", Container: "", Err: fmt.Errorf("请先选择一个容器")}
+			return ContainerOperationErrorMsg{Operation: "Edit container", Container: "", Err: fmt.Errorf("please select a container first")}
 		}
 	}
 
@@ -1350,7 +1354,7 @@ func (v *ListView) showEditView() tea.Cmd {
 
 		details, err := v.dockerClient.ContainerDetails(ctx, container.ID)
 		if err != nil {
-			return ContainerOperationErrorMsg{Operation: "获取容器详情", Container: container.Name, Err: err}
+			return ContainerOperationErrorMsg{Operation: "Get container details", Container: container.Name, Err: err}
 		}
 
 		return ContainerEditReadyMsg{Container: container, Details: details}
@@ -1397,10 +1401,10 @@ func (v *ListView) updateContainerConfig() tea.Cmd {
 
 		err := v.dockerClient.UpdateContainer(ctx, containerID, config)
 		if err != nil {
-			return ContainerOperationErrorMsg{Operation: "更新容器配置", Container: containerName, Err: err}
+			return ContainerOperationErrorMsg{Operation: "Update container config", Container: containerName, Err: err}
 		}
 
-		return ContainerOperationSuccessMsg{Operation: "更新配置", Container: containerName}
+		return ContainerOperationSuccessMsg{Operation: "Update config", Container: containerName}
 	}
 }
 
@@ -1479,7 +1483,7 @@ func (v *ListView) batchContainerOperation(opName string, containers []docker.Co
 				}
 			}
 			return ContainerOperationErrorMsg{
-				Operation: opName + "容器",
+				Operation: opName + " container",
 				Container: strings.Join(failedNames, ", "),
 				Err:       lastError,
 			}

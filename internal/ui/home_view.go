@@ -12,7 +12,6 @@ import (
 
 	"docktui/internal/compose"
 	"docktui/internal/docker"
-	"docktui/internal/i18n"
 )
 
 // ResourceType 资源类型
@@ -57,7 +56,7 @@ func NewHomeView(dockerClient docker.Client) *HomeView {
 	// 获取 Docker Host
 	dockerHost := os.Getenv("DOCKER_HOST")
 	if dockerHost == "" {
-		dockerHost = i18n.T("local_docker")
+		dockerHost = "Local Docker"
 	}
 
 	v := &HomeView{
@@ -67,10 +66,10 @@ func NewHomeView(dockerClient docker.Client) *HomeView {
 	}
 
 	v.resources = []ResourceInfo{
-		{Type: ResourceContainers, Name: i18n.T("containers"), Icon: "📦", Key: "c", Available: true},
-		{Type: ResourceImages, Name: i18n.T("images"), Icon: "🖼️", Key: "i", Available: true},
-		{Type: ResourceNetworks, Name: i18n.T("networks"), Icon: "🌐", Key: "n", Available: true},
-		{Type: ResourceCompose, Name: i18n.T("compose"), Icon: "🧩", Key: "o", Available: true},
+		{Type: ResourceContainers, Name: "Containers", Icon: "📦", Key: "c", Available: true},
+		{Type: ResourceImages, Name: "Images", Icon: "🖼️", Key: "i", Available: true},
+		{Type: ResourceNetworks, Name: "Networks", Icon: "🌐", Key: "n", Available: true},
+		{Type: ResourceCompose, Name: "Compose", Icon: "🧩", Key: "o", Available: true},
 	}
 
 	return v
@@ -80,14 +79,6 @@ func NewHomeView(dockerClient docker.Client) *HomeView {
 func (v *HomeView) Init() tea.Cmd {
 	v.loading = true
 	return v.loadStats
-}
-
-// refreshResourceNames refresh resource names after language change
-func (v *HomeView) refreshResourceNames() {
-	v.resources[0].Name = i18n.T("containers")
-	v.resources[1].Name = i18n.T("images")
-	v.resources[2].Name = i18n.T("networks")
-	v.resources[3].Name = i18n.T("compose")
 }
 
 // Update 处理消息
@@ -133,10 +124,6 @@ func (v *HomeView) Update(msg tea.Msg) (View, tea.Cmd) {
 		case "r", "f5":
 			v.loading = true
 			return v, v.loadStats
-		case "L":
-			// Toggle language
-			i18n.ToggleLanguage()
-			v.refreshResourceNames()
 		}
 	}
 
@@ -244,12 +231,6 @@ func (v *HomeView) renderLogo() string {
 		centeredLogo.WriteString(strings.Repeat(" ", leftPadding) + line + "\n")
 	}
 
-	// 语言切换 - 放在右上角
-	langStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	langHintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	langDisplay := langHintStyle.Render("L ") + langStyle.Render("[" + i18n.GetLanguageDisplay() + "]")
-	langLine := strings.Repeat(" ", width-lipgloss.Width(langDisplay)-2) + langDisplay
-
 	// 版本信息居中
 	subtitle := versionStyle.Render("Docker TUI  v0.1.0")
 	subtitleWidth := lipgloss.Width(subtitle)
@@ -258,7 +239,7 @@ func (v *HomeView) renderLogo() string {
 		subtitlePadding = 0
 	}
 
-	return langLine + "\n" + logoStyle.Render(centeredLogo.String()) + strings.Repeat(" ", subtitlePadding) + subtitle
+	return logoStyle.Render(centeredLogo.String()) + strings.Repeat(" ", subtitlePadding) + subtitle
 }
 
 // renderHeader 渲染顶部标题（保留兼容）
@@ -276,9 +257,9 @@ func (v *HomeView) renderHeader() string {
 	// 右侧刷新时间
 	var rightPart string
 	if v.loading {
-		rightPart = versionStyle.Render("加载中...")
+		rightPart = versionStyle.Render("Loading...")
 	} else if !v.lastRefreshTime.IsZero() {
-		rightPart = versionStyle.Render("刷新: " + v.lastRefreshTime.Format("15:04:05"))
+		rightPart = versionStyle.Render("Refresh: " + v.lastRefreshTime.Format("15:04:05"))
 	}
 
 	leftPart := title + " " + version
@@ -310,11 +291,11 @@ func (v *HomeView) renderConnectionStatus() string {
 
 	if v.dockerConnected {
 		statusIcon = "●"
-		statusText = "Docker " + i18n.T("connected")
+		statusText = "Docker Connected"
 		statusColor = lipgloss.Color("82")
 	} else {
 		statusIcon = "○"
-		statusText = "Docker " + i18n.T("disconnected")
+		statusText = "Docker Disconnected"
 		statusColor = lipgloss.Color("196")
 	}
 
@@ -412,7 +393,7 @@ func (v *HomeView) renderCardWithWidth(res ResourceInfo, selected bool, num int,
 	if v.loading {
 		stats = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("...")
 	} else if !res.Available {
-		stats = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render(i18n.T("unavailable"))
+		stats = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("Unavailable")
 	} else {
 		countStr := countStyle.Render(fmt.Sprintf("%d", res.Count))
 		if res.ActiveCount > 0 && (res.Type == ResourceContainers || res.Type == ResourceCompose) {
@@ -451,12 +432,11 @@ func (v *HomeView) renderFooter() string {
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	keys := []struct{ key, desc string }{
-		{"←→", i18n.T("select")},
-		{"Enter", i18n.T("enter")},
-		{"r", i18n.T("refresh")},
-		{"L", "Lang"},
-		{"?", i18n.T("help")},
-		{"q", i18n.T("exit")},
+		{"←→", "Select"},
+		{"Enter", "Enter"},
+		{"r", "Refresh"},
+		{"?", "Help"},
+		{"q", "Exit"},
 	}
 
 	var parts []string

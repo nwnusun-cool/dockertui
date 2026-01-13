@@ -36,7 +36,7 @@ func (c *LocalClient) PullImageWithProgress(ctx context.Context, imageRef string
 
 		// 发送初始状态
 		progress := NewPullProgress(imageRef)
-		progress.Message = "正在连接..."
+		progress.Message = "Connecting..."
 		progressChan <- *progress
 
 		// 开始拉取
@@ -44,7 +44,7 @@ func (c *LocalClient) PullImageWithProgress(ctx context.Context, imageRef string
 		if err != nil {
 			progress.Status = PullStatusError
 			progress.Error = err
-			progress.Message = "拉取失败: " + err.Error()
+			progress.Message = "Pull failed: " + err.Error()
 			progressChan <- *progress
 			return
 		}
@@ -69,7 +69,7 @@ func (c *LocalClient) parsePullProgress(ctx context.Context, reader io.Reader, p
 		case <-ctx.Done():
 			progress.Status = PullStatusError
 			progress.Error = ctx.Err()
-			progress.Message = "操作已取消"
+			progress.Message = "Operation cancelled"
 			out <- *progress
 			return
 		default:
@@ -105,7 +105,7 @@ func (c *LocalClient) parsePullProgress(ctx context.Context, reader io.Reader, p
 	if err := scanner.Err(); err != nil {
 		progress.Status = PullStatusError
 		progress.Error = err
-		progress.Message = "读取进度失败: " + err.Error()
+		progress.Message = "Failed to read progress: " + err.Error()
 		out <- *progress
 		return
 	}
@@ -114,7 +114,7 @@ func (c *LocalClient) parsePullProgress(ctx context.Context, reader io.Reader, p
 	if progress.Status != PullStatusError {
 		progress.Status = PullStatusComplete
 		progress.Percentage = 100
-		progress.Message = "拉取完成"
+		progress.Message = "Pull completed"
 		out <- *progress
 	}
 }
@@ -195,4 +195,4 @@ func (e *pullError) Error() string {
 }
 
 // ErrClientNotInitialized 客户端未初始化错误
-var ErrClientNotInitialized = &pullError{message: "Docker 客户端未初始化"}
+var ErrClientNotInitialized = &pullError{message: "Docker client not initialized"}
