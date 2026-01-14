@@ -10,5 +10,5 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo 启动 DockTUI...
-set DOCKER_HOST=tcp://192.168.3.49:2375
+set DOCKER_HOST=tcp://192.168.100.35:2375
 docktui.exe

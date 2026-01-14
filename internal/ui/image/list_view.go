@@ -124,6 +124,7 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 		v.successMsg = fmt.Sprintf("✅ %s succeeded: %s", msg.Operation, msg.Image)
 		v.successMsgTime = time.Now()
 		v.errorMsg = ""
+		v.selectedImages = make(map[string]bool) // 清空选择
 		return v, tea.Batch(v.loadImages, v.clearSuccessMessageAfter(3*time.Second))
 	case ImageOperationErrorMsg:
 		if v.errorDialog != nil { v.errorDialog.ShowError(fmt.Sprintf("%s failed (%s): %v", msg.Operation, msg.Image, msg.Err)) }
@@ -244,6 +245,18 @@ func (v *ListView) executeConfirmAction() (*ListView, tea.Cmd) {
 		v.resetConfirmDialog()
 		if action == "remove" && image != nil { return v, v.removeImage(image, false) }
 		if action == "force_remove" && image != nil { return v, v.removeImage(image, true) }
+		if action == "remove_batch" {
+			count := len(v.selectedImages)
+			v.successMsg = fmt.Sprintf("⏳ Deleting %d images...", count)
+			v.successMsgTime = time.Now()
+			return v, v.removeBatchImages(false)
+		}
+		if action == "force_remove_batch" {
+			count := len(v.selectedImages)
+			v.successMsg = fmt.Sprintf("⏳ Force deleting %d images...", count)
+			v.successMsgTime = time.Now()
+			return v, v.removeBatchImages(true)
+		}
 		if action == "prune" { return v, v.pruneImages() }
 		if action == "pull" && pullRef != "" {
 			v.startPullTaskSync(pullRef)
@@ -575,10 +588,16 @@ func (v *ListView) renderConfirmDialogContent() string {
 		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag; if len(imageName) > 35 { imageName = imageName[:32] + "..." }
 		title = titleStyle.Render("⚠️  Delete Image: " + imageName)
 		warning = warningStyle.Render("This action cannot be undone!")
+	} else if v.confirmAction == "remove_batch" {
+		title = titleStyle.Render(fmt.Sprintf("⚠️  Delete %d Images", len(v.selectedImages)))
+		warning = warningStyle.Render("This action cannot be undone!")
 	} else if v.confirmAction == "force_remove" && v.confirmImage != nil {
 		imageName := v.confirmImage.Repository + ":" + v.confirmImage.Tag; if len(imageName) > 35 { imageName = imageName[:32] + "..." }
 		title = titleStyle.Render("⚠️  Force Delete Image: " + imageName)
-		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("⚠️  This image is being used by containers!\n") + warningStyle.Render("Force deletion may cause related containers to malfunction.\nAre you sure you want to continue?")
+		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("⚠️  Cannot delete normally!\n") + warningStyle.Render("Possible reasons:\n• Image has multiple tags (same ID, different names)\n• Image is referenced by stopped containers\n\n💡 Force delete will remove all related tags.\nAre you sure?")
+	} else if v.confirmAction == "force_remove_batch" {
+		title = titleStyle.Render(fmt.Sprintf("⚠️  Force Delete %d Images", len(v.selectedImages)))
+		warning = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true).Render("⚠️  Some images cannot be deleted normally!\n") + warningStyle.Render("Possible reasons:\n• Images have multiple tags (same ID, different names)\n• Images are referenced by stopped containers\n\n💡 Force delete will remove all related tags.\nAre you sure?")
 	} else if v.confirmAction == "prune" {
 		title = titleStyle.Render("⚠️  Prune Dangling Images")
 		warning = warningStyle.Render("Will delete all untagged dangling images to free disk space")
@@ -601,6 +620,15 @@ func (v *ListView) renderConfirmDialogContent() string {
 }
 
 func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
+	// 如果有批量选择的镜像，则批量删除
+	if len(v.selectedImages) > 0 {
+		v.showConfirmDialog = true
+		v.confirmAction = "remove_batch"
+		v.confirmImage = nil
+		v.confirmSelection = 0
+		return nil
+	}
+	// 否则删除当前选中的单个镜像
 	image := v.GetSelectedImage()
 	if image == nil { return func() tea.Msg { return ImageOperationErrorMsg{Operation: "Delete image", Image: "", Err: fmt.Errorf("please select an image first")} } }
 	v.showConfirmDialog = true; v.confirmAction = "remove"; v.confirmImage = image; v.confirmSelection = 0
@@ -608,7 +636,18 @@ func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
 }
 
 func (v *ListView) showForceRemoveConfirmDialog(image *docker.Image) {
-	v.showConfirmDialog = true; v.confirmAction = "force_remove"; v.confirmImage = image; v.confirmSelection = 0
+	// 如果是批量删除时遇到的错误，显示批量强制删除确认框
+	if len(v.selectedImages) > 0 {
+		v.showConfirmDialog = true
+		v.confirmAction = "force_remove_batch"
+		v.confirmImage = nil
+		v.confirmSelection = 0
+	} else {
+		v.showConfirmDialog = true
+		v.confirmAction = "force_remove"
+		v.confirmImage = image
+		v.confirmSelection = 0
+	}
 }
 
 func (v *ListView) showPruneConfirmDialog() tea.Cmd {
@@ -623,12 +662,82 @@ func (v *ListView) removeImage(image *docker.Image, force bool) tea.Cmd {
 		err := v.dockerClient.RemoveImage(ctx, image.ID, force, false)
 		if err != nil {
 			errStr := err.Error()
-			if strings.Contains(errStr, "image is being used") || strings.Contains(errStr, "image has dependent child images") || strings.Contains(errStr, "conflict") {
+			// 镜像被容器使用 或 被多个仓库引用，都需要强制删除
+			if strings.Contains(errStr, "image is being used by") || 
+			   strings.Contains(errStr, "is using") ||
+			   strings.Contains(errStr, "referenced in multiple repositories") {
 				return ImageInUseErrorMsg{Image: image, Err: err}
 			}
 			return ImageOperationErrorMsg{Operation: "Delete image", Image: image.Repository + ":" + image.Tag, Err: err}
 		}
 		return ImageOperationSuccessMsg{Operation: "Delete", Image: image.Repository + ":" + image.Tag}
+	}
+}
+
+func (v *ListView) removeBatchImages(force bool) tea.Cmd {
+	// 在闭包外部捕获要删除的镜像列表
+	var imagesToDelete []*docker.Image
+	for _, img := range v.filteredImages {
+		if v.selectedImages[img.ID] {
+			imgCopy := img // 创建副本避免闭包问题
+			imagesToDelete = append(imagesToDelete, &imgCopy)
+		}
+	}
+	
+	// 如果没有要删除的镜像，直接返回错误
+	if len(imagesToDelete) == 0 {
+		return func() tea.Msg {
+			return ImageOperationErrorMsg{Operation: "Batch delete", Image: "", Err: fmt.Errorf("no images selected")}
+		}
+	}
+	
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		
+		successCount := 0
+		failCount := 0
+		var lastErr error
+		var inUseImages []*docker.Image
+		
+		// 批量删除
+		for _, img := range imagesToDelete {
+			err := v.dockerClient.RemoveImage(ctx, img.ID, force, false)
+			if err != nil {
+				errStr := err.Error()
+				// 镜像被容器使用 或 被多个仓库引用
+				if strings.Contains(errStr, "image is being used by") || 
+				   strings.Contains(errStr, "is using") ||
+				   strings.Contains(errStr, "referenced in multiple repositories") {
+					inUseImages = append(inUseImages, img)
+				}
+				failCount++
+				lastErr = err
+			} else {
+				successCount++
+			}
+		}
+		
+		// 如果有镜像正在使用且不是强制删除，提示用户
+		if len(inUseImages) > 0 && !force {
+			// 只提示第一个正在使用的镜像
+			return ImageInUseErrorMsg{Image: inUseImages[0], Err: fmt.Errorf("image is being used by containers")}
+		}
+		
+		// 删除完成后清空选择（通过消息通知）
+		if failCount > 0 && successCount == 0 {
+			return ImageOperationErrorMsg{Operation: "Batch delete", Image: fmt.Sprintf("%d images", len(imagesToDelete)), Err: lastErr}
+		}
+		
+		if successCount > 0 {
+			msg := fmt.Sprintf("Deleted %d images", successCount)
+			if failCount > 0 {
+				msg += fmt.Sprintf(", %d failed", failCount)
+			}
+			return ImageOperationSuccessMsg{Operation: "Batch delete", Image: msg}
+		}
+		
+		return ImageOperationErrorMsg{Operation: "Batch delete", Image: "", Err: fmt.Errorf("no images deleted")}
 	}
 }
 

@@ -271,6 +271,12 @@ func (v *ListView) Update(msg tea.Msg) (*ListView, tea.Cmd) {
 					if action == "remove" && container != nil {
 						return v, v.removeContainer(container)
 					}
+					if action == "remove_batch" {
+						count := len(v.selectedContainers)
+						v.successMsg = fmt.Sprintf("⏳ Deleting %d containers...", count)
+						v.successMsgTime = time.Now()
+						return v, v.removeBatchContainers()
+					}
 				} else {
 					v.showConfirmDialog = false
 					v.confirmAction = ""
@@ -665,10 +671,6 @@ func (v *ListView) overlayDialog(baseContent string) string {
 
 // renderConfirmDialogContent 渲染对话框内容
 func (v *ListView) renderConfirmDialogContent() string {
-	if v.confirmContainer == nil {
-		return ""
-	}
-
 	dialogStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -689,18 +691,40 @@ func (v *ListView) renderConfirmDialogContent() string {
 		okBtnStyle = okBtnStyle.Reverse(true).Bold(true)
 	}
 	
-	containerName := v.confirmContainer.Name
-	if len(containerName) > 35 {
-		containerName = containerName[:32] + "..."
-	}
+	var title, warning string
 	
-	warningText := "This action cannot be undone!"
-	if v.confirmContainer.State == "running" {
-		warningText = "⚠️  Container is running, will force delete!"
+	if v.confirmAction == "remove_batch" {
+		// 批量删除
+		count := len(v.selectedContainers)
+		runningCount := 0
+		for _, c := range v.filteredContainers {
+			if v.selectedContainers[c.ID] && c.State == "running" {
+				runningCount++
+			}
+		}
+		title = titleStyle.Render(fmt.Sprintf("⚠️  Delete %d Containers", count))
+		if runningCount > 0 {
+			warning = warningStyle.Render(fmt.Sprintf("⚠️  %d container(s) are running, will force delete!\nThis action cannot be undone!", runningCount))
+		} else {
+			warning = warningStyle.Render("This action cannot be undone!")
+		}
+	} else if v.confirmContainer != nil {
+		// 单个删除
+		containerName := v.confirmContainer.Name
+		if len(containerName) > 35 {
+			containerName = containerName[:32] + "..."
+		}
+		
+		warningText := "This action cannot be undone!"
+		if v.confirmContainer.State == "running" {
+			warningText = "⚠️  Container is running, will force delete!"
+		}
+		
+		title = titleStyle.Render("⚠️  Delete Container: " + containerName)
+		warning = warningStyle.Render(warningText)
+	} else {
+		return ""
 	}
-	
-	title := titleStyle.Render("⚠️  Delete Container: " + containerName)
-	warning := warningStyle.Render(warningText)
 	
 	cancelBtn := cancelBtnStyle.Render("< Cancel >")
 	okBtn := okBtnStyle.Render("< OK >")
@@ -1259,6 +1283,15 @@ func (v *ListView) restartSelectedContainer() tea.Cmd {
 
 // showRemoveConfirmDialog 显示删除确认对话框
 func (v *ListView) showRemoveConfirmDialog() tea.Cmd {
+	// 如果有批量选择的容器，则批量删除
+	if len(v.selectedContainers) > 0 {
+		v.showConfirmDialog = true
+		v.confirmAction = "remove_batch"
+		v.confirmContainer = nil
+		v.confirmSelection = 0
+		return nil
+	}
+	// 否则删除当前选中的单个容器
 	container := v.GetSelectedContainer()
 	if container == nil {
 		return func() tea.Msg {
@@ -1286,6 +1319,55 @@ func (v *ListView) removeContainer(container *docker.Container) tea.Cmd {
 		}
 
 		return ContainerOperationSuccessMsg{Operation: "Delete", Container: container.Name}
+	}
+}
+
+// removeBatchContainers 批量删除容器
+func (v *ListView) removeBatchContainers() tea.Cmd {
+	// 在闭包外部捕获要删除的容器列表
+	var containersToDelete []docker.Container
+	for _, c := range v.filteredContainers {
+		if v.selectedContainers[c.ID] {
+			containersToDelete = append(containersToDelete, c)
+		}
+	}
+	
+	if len(containersToDelete) == 0 {
+		return func() tea.Msg {
+			return ContainerOperationErrorMsg{Operation: "Batch delete", Container: "", Err: fmt.Errorf("no containers selected")}
+		}
+	}
+	
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		
+		successCount := 0
+		failedCount := 0
+		var failedNames []string
+		var lastErr error
+		
+		for _, c := range containersToDelete {
+			force := c.State == "running"
+			err := v.dockerClient.RemoveContainer(ctx, c.ID, force, false)
+			if err != nil {
+				failedCount++
+				failedNames = append(failedNames, c.Name)
+				lastErr = err
+			} else {
+				successCount++
+			}
+		}
+		
+		v.selectedContainers = make(map[string]bool)
+		
+		return ContainerBatchOperationMsg{
+			Operation:    "Delete",
+			SuccessCount: successCount,
+			FailedCount:  failedCount,
+			FailedNames:  failedNames,
+			Err:          lastErr,
+		}
 	}
 }
 
